@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from app.core.logging import get_logger
+from app.core.text import infer_log_level
+from app.jobs.job_logs import MAX_PAGE_SIZE, JobLogStore, get_job_log_store
+from app.jobs.lifecycle import derive_lifecycle
 from app.jobs.repository import JobRepository
 from app.models.job import Job, utc_now_iso
+from app.pipeline.constants import BACKGROUND_REMOVAL_STAGE_ID
 from app.pipeline.pipeline_state import PipelineState
+from app.pipeline.runnable import stage_is_runnable
 from app.pipeline.stage import PipelineStage, StageResult
 from app.pipeline.stage_registry import StageRegistry
 
@@ -41,7 +46,7 @@ class _StageContext:
     stage_id: int
 
     def log(self, message: str, level: str = "info") -> None:
-        self.manager.log(self.job_id, message, level=level)
+        self.manager.log(self.job_id, message, level=level, stage_id=self.stage_id)
 
     def update_progress(self, progress: int) -> None:
         self.manager._state.mark_stage_running(self.job_id, self.stage_id, progress=progress)
@@ -64,18 +69,22 @@ class PipelineRunResult:
 class PipelineManager:
     """Owns pipeline execution, logging, and persistence."""
 
+    # Shared across instances: the API builds a new manager per request.
+    _locks: ClassVar[dict[str, asyncio.Lock]] = {}
+
     def __init__(
         self,
         registry: StageRegistry | None = None,
         state: PipelineState | None = None,
         repository: JobRepository | None = None,
+        log_store: JobLogStore | None = None,
     ) -> None:
         self._registry = registry or StageRegistry()
         self._state = state or PipelineState()
         self._repository = repository or JobRepository()
+        self._log_store = log_store or get_job_log_store(self._repository.jobs_root)
         self._controls: dict[str, _JobRunControl] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._job_logs: dict[str, list[str]] = {}
+        self._run_start_seq: dict[str, int] = {}
 
     def initialize(self, job_id: str) -> dict[str, Any]:
         """Create the initial ``pipeline.json`` for a new job."""
@@ -91,18 +100,36 @@ class PipelineManager:
         }
         return self._state.save(job_id, document)
 
-    def log(self, job_id: str, message: str, *, level: str = "info") -> None:
-        """Record a pipeline log line and emit it to the application logger."""
-        line = f"[{job_id}] {message}"
-        self._job_logs.setdefault(job_id, []).append(line)
-        log_fn = getattr(logger, "warning" if level == "warn" else level, logger.info)
-        log_fn(line)
+    def log(
+        self,
+        job_id: str,
+        message: str,
+        *,
+        level: str = "info",
+        stage_id: int | None = None,
+    ) -> None:
+        """Record a pipeline log line in the job log store and the application logger."""
+        if level == "info":
+            # Subprocess output arrives as plain info; honour its own severity markers.
+            level = infer_log_level(message)
+        entry = self._log_store.append(job_id, message, level=level, stage_id=stage_id)
+        log_fn = {"warn": logger.warning, "error": logger.error}.get(entry.level, logger.info)
+        log_fn("[%s] %s", job_id, entry.message)
 
     def get_logs(self, job_id: str) -> list[str]:
-        return list(self._job_logs.get(job_id, []))
+        """Return buffered log lines recorded since the current run started."""
+        after = self._run_start_seq.get(job_id, self._log_store.last_seq(job_id))
+        lines: list[str] = []
+        while True:
+            page = self._log_store.read(job_id, after=after, limit=MAX_PAGE_SIZE)
+            lines.extend(f"[{job_id}] {entry.message}" for entry in page.entries)
+            if not page.has_more:
+                return lines
+            after = page.next_after
 
-    def clear_logs(self, job_id: str) -> None:
-        self._job_logs[job_id] = []
+    def _mark_run_start(self, job_id: str) -> None:
+        """Scope ``get_logs`` to the run that starts now; persisted history is kept."""
+        self._run_start_seq[job_id] = self._log_store.last_seq(job_id)
 
     def get_pipeline_document(self, job_id: str) -> dict[str, Any]:
         return self._state.load(job_id)
@@ -138,6 +165,7 @@ class PipelineManager:
     async def run_next_stage(self, job_id: str) -> PipelineRunResult:
         """Execute the next incomplete stage for a job."""
         job = self._require_job(job_id)
+        self._mark_run_start(job_id)
         next_stage = self._next_runnable_stage(job_id)
         if next_stage is None:
             return PipelineRunResult(
@@ -153,6 +181,17 @@ class PipelineManager:
         stage = self._registry.get(stage_id)
         if stage is None:
             raise ValueError(f"Unknown stage id: {stage_id}")
+
+        self._mark_run_start(job_id)
+        document = self._state.load(job_id)
+        runnable, reason = stage_is_runnable(document, stage_id)
+        if not runnable:
+            result = PipelineRunResult(job_id=job_id, stopped_reason="stage_not_runnable")
+            self.log(job_id, reason, level="error")
+            result.logs = self.get_logs(job_id)
+            result.last_result = StageResult(success=False, message=reason)
+            return result
+
         return await self._run_single_stage(job, stage)
 
     async def run_pipeline(self, job_id: str) -> PipelineRunResult:
@@ -160,10 +199,10 @@ class PipelineManager:
         job = self._require_job(job_id)
         result = PipelineRunResult(job_id=job_id)
 
-        async with self._job_lock(job_id):
+        async with self._acquire_job_lock(job_id):
             self._ensure_recovered(job_id)
             self._set_running(job_id)
-            self.clear_logs(job_id)
+            self._mark_run_start(job_id)
             self.log(job_id, "Pipeline started.")
 
             try:
@@ -176,6 +215,14 @@ class PipelineManager:
 
                     if self._is_stage_complete(job_id, stage.stage_id):
                         continue
+
+                    document = self._state.load(job_id)
+                    runnable, reason = stage_is_runnable(document, stage.stage_id)
+                    if not runnable:
+                        self.log(job_id, reason, level="error")
+                        result.stopped_reason = "stage_not_runnable"
+                        result.last_result = StageResult(success=False, message=reason)
+                        break
 
                     stage_result = await self._execute_stage(job, stage)
                     result.stages_run.append(stage.stage_id)
@@ -228,6 +275,22 @@ class PipelineManager:
         self.log(job_id, "Pipeline cancelled.")
         return document
 
+    async def reset_from_stage(self, job_id: str, stage_id: int) -> dict[str, Any]:
+        """Reset ``stage_id`` and all dependent stages to ``waiting`` without running them."""
+        self._require_job(job_id)
+        if stage_id < BACKGROUND_REMOVAL_STAGE_ID or self._registry.get(stage_id) is None:
+            raise ValueError(
+                f"Cannot reset from stage {stage_id}; "
+                f"choose a stage id from {BACKGROUND_REMOVAL_STAGE_ID} onwards."
+            )
+
+        async with self._acquire_job_lock(job_id):
+            self._ensure_recovered(job_id)
+            document = self._state.reset_stages_from(job_id, stage_id)
+            self._sync_job_lifecycle(job_id)
+            self.log(job_id, f"Pipeline reset: stage {stage_id} and later stages set to waiting.")
+            return document
+
     def recover(self, job_id: str) -> dict[str, Any]:
         """Recover pipeline state after a process restart."""
         self._controls.pop(job_id, None)
@@ -246,6 +309,13 @@ class PipelineManager:
             self._locks[job_id] = asyncio.Lock()
         return self._locks[job_id]
 
+    def _acquire_job_lock(self, job_id: str) -> asyncio.Lock:
+        """Return the job lock for ``async with``, rejecting concurrent runs and resets."""
+        lock = self._job_lock(job_id)
+        if lock.locked():
+            raise PipelineBusyError(f"Pipeline for {job_id} is already running.")
+        return lock
+
     def _ensure_recovered(self, job_id: str) -> None:
         status = self._state.execution_status(job_id)
         if status in {"running", "paused"}:
@@ -253,7 +323,8 @@ class PipelineManager:
 
     def _set_running(self, job_id: str) -> None:
         self._controls[job_id] = _JobRunControl()
-        self._state.set_execution(job_id, status="running", last_error=None)
+        self._state.set_execution(job_id, status="running", clear_last_error=True)
+        self._sync_job_lifecycle(job_id, run_started=True)
 
     def _finish_execution(self, job_id: str) -> None:
         control = self._controls.get(job_id)
@@ -265,6 +336,32 @@ class PipelineManager:
             status = "idle"
         self._state.set_execution(job_id, status=status, clear_current_stage=True)
         self._controls.pop(job_id, None)
+        self._sync_job_lifecycle(job_id)
+
+    def _sync_job_lifecycle(self, job_id: str, *, run_started: bool = False) -> None:
+        """Persist the job-level status/progress derived from ``pipeline.json``.
+
+        ``pipeline.json`` stays authoritative; this keeps ``metadata.json`` consistent for
+        readers of the job record and makes the final status survive restarts.
+        """
+        job = self._repository.get(job_id)
+        if job is None:
+            return
+        lifecycle = derive_lifecycle(self._state.load(job_id))
+        fields: dict[str, Any] = {
+            "status": lifecycle.status,
+            "progress": lifecycle.progress,
+            "completed_at": lifecycle.completed_at,
+        }
+        if run_started and job.started_at is None:
+            fields["started_at"] = utc_now_iso()
+        self._repository.update(job_id, **fields)
+
+    @classmethod
+    def is_running(cls, job_id: str) -> bool:
+        """Return whether this process is executing a pipeline run for ``job_id``."""
+        lock = cls._locks.get(job_id)
+        return lock is not None and lock.locked()
 
     def _check_control(self, job_id: str) -> None:
         control = self._controls.get(job_id)
@@ -289,7 +386,7 @@ class PipelineManager:
     async def _run_single_stage(self, job: Job, stage: PipelineStage) -> PipelineRunResult:
         result = PipelineRunResult(job_id=job.id)
 
-        async with self._job_lock(job.id):
+        async with self._acquire_job_lock(job.id):
             self._ensure_recovered(job.id)
             self._set_running(job.id)
             self.log(job.id, f"Running stage {stage.stage_id}: {stage.name()}")
@@ -315,7 +412,7 @@ class PipelineManager:
 
         self._state.mark_stage_before(job.id, stage.stage_id)
         self._state.set_execution(job.id, current_stage_id=stage.stage_id)
-        self.log(job.id, f"Stage {stage.stage_id} ({stage.name()}) starting.")
+        self.log(job.id, f"Stage {stage.stage_id} ({stage.name()}) starting.", stage_id=stage.stage_id)
 
         try:
             stage_result = await stage.run(job, ctx)
@@ -323,15 +420,28 @@ class PipelineManager:
             raise
         except Exception as exc:
             self._state.mark_stage_failed(job.id, stage.stage_id, message=str(exc))
-            self.log(job.id, f"Stage {stage.stage_id} failed: {exc}", level="error")
+            self.log(
+                job.id, f"Stage {stage.stage_id} failed: {exc}", level="error", stage_id=stage.stage_id
+            )
             return StageResult(success=False, message=str(exc))
 
         if stage_result.implemented and stage_result.success:
             self._state.mark_stage_completed(job.id, stage.stage_id)
-            self.log(job.id, f"Stage {stage.stage_id} ({stage.name()}) completed.")
+            self._sync_job_lifecycle(job.id)
+            self.log(
+                job.id,
+                f"Stage {stage.stage_id} ({stage.name()}) completed.",
+                level="ok",
+                stage_id=stage.stage_id,
+            )
         elif stage_result.implemented and not stage_result.success:
             self._state.mark_stage_failed(job.id, stage.stage_id, message=stage_result.message)
-            self.log(job.id, f"Stage {stage.stage_id} failed: {stage_result.message}", level="error")
+            self.log(
+                job.id,
+                f"Stage {stage.stage_id} failed: {stage_result.message}",
+                level="error",
+                stage_id=stage.stage_id,
+            )
 
         return stage_result
 

@@ -130,6 +130,18 @@ def validate_instant_ngp(settings: Settings | None = None) -> InstantNGPValidati
     if binding_version and interpreter_version:
         result.python_version_match = True
 
+    if not _interpreter_can_import(interpreter_path, "commentjson"):
+        result.errors.append(
+            "Instant-NGP requires the commentjson package in the configured Python environment."
+        )
+        result.message = (
+            "Instant-NGP runtime dependency missing: commentjson. "
+            f"Install it for {interpreter_path} (for example: "
+            f"'{interpreter_path} -m pip install commentjson')."
+        )
+        result.error_code = "INSTANT_NGP_DEPENDENCY_MISSING"
+        return result
+
     if result.errors:
         result.message = result.errors[0]
         result.error_code = result.error_code or "INSTANT_NGP_UNAVAILABLE"
@@ -175,6 +187,20 @@ def _python_version_from_interpreter(python_executable: str) -> str | None:
     return version or None
 
 
+def _interpreter_can_import(interpreter_path: str, module_name: str) -> bool:
+    try:
+        completed = subprocess.run(
+            [interpreter_path, "-c", f"import {module_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _resolve_python_executable(python_executable: str) -> str | None:
     """Resolve ``python_executable`` into an executable path.
 
@@ -183,7 +209,7 @@ def _resolve_python_executable(python_executable: str) -> str | None:
     """
     candidate = Path(python_executable)
     if candidate.is_file():
-        return str(candidate.resolve())
+        return str(candidate)
 
     try:
         completed = subprocess.run(

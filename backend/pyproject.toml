@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuralcanvas-backend"
+version = "0.1.0"
+description = "FastAPI backend for NeuralCanvas — AI-Powered 3D Reconstruction Platform"
+readme = "README.md"
+# 3.10 matches the Python that Instant-NGP's pyngp bindings are built for.
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "NeuralCanvas Contributors" }]
+keywords = ["nerf", "3d-reconstruction", "instant-ngp", "fastapi", "colmap"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "python-multipart",
+    "aiofiles",
+    "Pillow",
+    "rembg[cpu]",
+    "trimesh",
+    "fast-simplification>=0.2.0",
+    "pygltflib",
+    "commentjson",
+]
+
+[project.urls]
+Homepage = "https://github.com/Parth-Dhunde/neural-canvas"
+Repository = "https://github.com/Parth-Dhunde/neural-canvas"
+Documentation = "https://github.com/Parth-Dhunde/neural-canvas#readme"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

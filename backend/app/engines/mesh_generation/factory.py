@@ -13,7 +13,4 @@ def get_mesh_generation_engine(job: Job) -> MeshGenerationEngine:
     engine_name = normalize_engine_name(job.engine)
     if engine_name == "Instant-NGP":
         return InstantNGPMeshGenerationEngine()
-    if engine_name == "Custom NeRF":
-        raise ValueError("Mesh generation is not implemented for Custom NeRF yet.")
     raise ValueError(f"Unsupported mesh generation engine: {job.engine}")
-

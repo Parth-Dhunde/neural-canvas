@@ -42,6 +42,8 @@ class InstantNGPLauncher:
         build_path = str(self.root / "build")
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = os.pathsep.join([build_path, existing]).strip(os.pathsep)
+        # Stream run.py output line by line instead of in block-buffered chunks.
+        env["PYTHONUNBUFFERED"] = "1"
         return env
 
     def run_training(
@@ -97,6 +99,14 @@ class InstantNGPLauncher:
             on_line=on_line,
             check_control=check_control,
         )
+
+    def active_pid(self, job_id: str) -> int | None:
+        """Return the PID of the running Instant-NGP process for ``job_id``, if any."""
+        with _process_lock:
+            process = _active_processes.get(job_id)
+        if process is None or process.poll() is not None:
+            return None
+        return process.pid
 
     def cancel(self, job_id: str) -> bool:
         """Terminate an active Instant-NGP process for ``job_id``."""
@@ -185,33 +195,72 @@ class InstantNGPLauncher:
         Uses the current process environment (including PATH) to allow mise-managed
         environments, but never assumes a default like ``python3``.
         """
-        candidate = self._settings.instant_ngp_python
-        path = Path(candidate)
-        if path.is_file():
-            return str(path.resolve())
+        candidates = self._interpreter_candidates()
+        for interpreter in candidates:
+            if self._interpreter_can_import(interpreter, "commentjson"):
+                return interpreter
 
-        # Resolve via environment/PATH by asking Python itself.
+        raise RuntimeError(
+            "Instant-NGP Python interpreter is missing runtime dependency commentjson. "
+            f"Tried: {', '.join(candidates)}. "
+            "Install it in that environment (for example: "
+            "'<python> -m pip install commentjson') or set INSTANT_NGP_PYTHON to the "
+            "backend virtualenv python."
+        )
+
+    def _interpreter_candidates(self) -> list[str]:
+        """Return interpreter paths to try, preserving venv shims."""
+        configured = self._settings.instant_ngp_python
+        candidates: list[str] = []
+
+        configured_path = Path(configured)
+        if configured_path.is_file():
+            candidates.append(str(configured_path))
+
+        backend_venv = Path(__file__).resolve().parents[3] / ".venv" / "bin" / "python"
+        if backend_venv.is_file():
+            venv_python = str(backend_venv)
+            if venv_python not in candidates:
+                candidates.append(venv_python)
+
+        if not candidates:
+            try:
+                completed = subprocess.run(
+                    [configured, "-c", "import sys; print(sys.executable)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                    env=os.environ.copy(),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError(
+                    "Instant-NGP Python interpreter could not be executed. "
+                    "Set INSTANT_NGP_PYTHON to an absolute path or an executable available "
+                    "in the current environment."
+                ) from exc
+
+            resolved = completed.stdout.strip() if completed.returncode == 0 else ""
+            if not resolved:
+                raise RuntimeError(
+                    "Instant-NGP Python interpreter could not be executed. "
+                    "Set INSTANT_NGP_PYTHON to an absolute path or an executable available "
+                    "in the current environment."
+                )
+            candidates.append(resolved)
+
+        return candidates
+
+    @staticmethod
+    def _interpreter_can_import(interpreter: str, module_name: str) -> bool:
         try:
             completed = subprocess.run(
-                [candidate, "-c", "import sys; print(sys.executable)"],
+                [interpreter, "-c", f"import {module_name}"],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 check=False,
-                env=os.environ.copy(),
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError(
-                "Instant-NGP Python interpreter could not be executed. "
-                "Set INSTANT_NGP_PYTHON to an absolute path or an executable available "
-                "in the current environment."
-            ) from exc
-
-        resolved = completed.stdout.strip() if completed.returncode == 0 else ""
-        if not resolved:
-            raise RuntimeError(
-                "Instant-NGP Python interpreter could not be executed. "
-                "Set INSTANT_NGP_PYTHON to an absolute path or an executable available "
-                "in the current environment."
-            )
-        return resolved
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return completed.returncode == 0

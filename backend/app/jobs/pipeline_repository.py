@@ -1,6 +1,8 @@
 """Pipeline stage persistence for reconstruction jobs."""
 
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +59,10 @@ class PipelineRepository:
         """Persist pipeline state to disk."""
         path = self.pipeline_path(job_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        # Write-then-rename so concurrent readers (API polling) never see a partial file.
+        temp_path = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        temp_path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        os.replace(temp_path, path)
         return document
 
     def get_stage(self, job_id: str, stage_id: int) -> dict[str, Any] | None:

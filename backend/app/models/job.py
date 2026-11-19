@@ -17,9 +17,14 @@ class Job:
     id: str
     name: str
     engine: str
+    # "image_to_3d" for the photo pipeline; other generation modes get their own type.
+    job_type: str = "image_to_3d"
     status: str = "waiting"
     progress: int = 0
     created_at: str = field(default_factory=utc_now_iso)
+    # Lifecycle timestamps written by the pipeline manager (absent on older jobs).
+    started_at: str | None = None
+    completed_at: str | None = None
     image_count: int = 0
     uploaded_at: str | None = None
     image_filenames: list[str] = field(default_factory=list)
@@ -34,6 +39,12 @@ class Job:
     mesh_formats: list[str] = field(default_factory=list)
     vertex_count: int = 0
     triangle_count: int = 0
+    # Stage 6 summary (status, source/output paths, counts, parameters, warnings).
+    mesh_cleanup: dict[str, Any] | None = None
+    # Stage 7 summary (generated_at, preferred variant, verified formats).
+    exports: dict[str, Any] | None = None
+    # Stage 4 training measurements (loss, step rate, checkpoints, peak VRAM).
+    training_metrics: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the job to a plain dictionary."""
@@ -47,9 +58,12 @@ class Job:
             id=data["id"],
             name=data["name"],
             engine=data["engine"],
+            job_type=data.get("job_type") or "image_to_3d",
             status=data.get("status", "waiting"),
             progress=int(data.get("progress", 0)),
             created_at=data.get("created_at", utc_now_iso()),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
             image_count=int(data.get("image_count", 0)),
             uploaded_at=data.get("uploaded_at"),
             image_filenames=list(filenames) if filenames else [],
@@ -64,4 +78,7 @@ class Job:
             mesh_formats=list(data.get("mesh_formats") or []),
             vertex_count=int(data.get("vertex_count", 0)),
             triangle_count=int(data.get("triangle_count", 0)),
+            mesh_cleanup=data.get("mesh_cleanup"),
+            exports=data.get("exports"),
+            training_metrics=data.get("training_metrics"),
         )

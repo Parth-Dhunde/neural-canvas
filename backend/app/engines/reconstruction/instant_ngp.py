@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
 from app.engines.instant_ngp.launcher import InstantNGPLauncher
+from app.engines.instant_ngp.training_metrics import TrainingMetricsTracker, count_checkpoints
 from app.engines.instant_ngp.validation import validate_instant_ngp
 from app.engines.reconstruction.base import (
     ControlCallback,
@@ -28,8 +30,74 @@ from app.jobs.structure import (
     masked_images_path,
 )
 from app.models.job import Job
+from app.services.gpu_memory import PeakGpuMemorySampler
 
 MIN_MASKED_IMAGES = 2
+
+# tqdm progress bar, e.g. "Training:  42%|####| 14700/35000 [10:02<13:51, 24.4steps/s, loss=0.016]".
+_TQDM_RE = re.compile(r"(\d+)/(\d+) \[[^\]]*\]")
+_LOSS_RE = re.compile(r"loss=([0-9.eE+-]+)")
+PROGRESS_LOG_INTERVAL_PERCENT = 5
+TRAINING_PROGRESS_START = 20
+TRAINING_PROGRESS_END = 95
+
+
+class TrainingOutputForwarder:
+    """Forward Instant-NGP output to the pipeline log, condensing tqdm progress updates.
+
+    tqdm redraws its bar with carriage returns, which arrive as one line per update; only
+    every ``PROGRESS_LOG_INTERVAL_PERCENT`` is logged, while stage progress tracks steps.
+    """
+
+    def __init__(
+        self,
+        *,
+        emit: Callable[..., None],
+        progress: ProgressCallback,
+        metrics: TrainingMetricsTracker | None = None,
+    ) -> None:
+        self._emit = emit
+        self._progress = progress
+        self._metrics = metrics
+        self._last_logged_percent = -1
+        self._last_progress = TRAINING_PROGRESS_START
+        self._plain_lines = 0
+        self._saw_steps = False
+
+    def __call__(self, line: str) -> None:
+        if self._metrics is not None:
+            self._metrics.observe(line)
+        match = _TQDM_RE.search(line)
+        if match is None:
+            self._plain_lines += 1
+            if not self._saw_steps and self._plain_lines % 25 == 0:
+                self._set_progress(TRAINING_PROGRESS_START + self._plain_lines // 25)
+            self._emit(line)
+            return
+
+        self._saw_steps = True
+        step, total = int(match.group(1)), int(match.group(2))
+        if total > 0:
+            percent = min(100, step * 100 // total)
+            span = TRAINING_PROGRESS_END - TRAINING_PROGRESS_START
+            self._set_progress(TRAINING_PROGRESS_START + percent * span // 100)
+            bucket = percent - percent % PROGRESS_LOG_INTERVAL_PERCENT
+            if bucket > self._last_logged_percent:
+                self._last_logged_percent = bucket
+                loss = _LOSS_RE.search(line)
+                suffix = f", loss={loss.group(1)}" if loss else ""
+                self._emit(f"Training {percent}% ({step}/{total} steps{suffix})")
+
+        # Log lines printed while the bar is drawn share its line (no newline in between).
+        trailing = line[match.end():].strip()
+        if trailing:
+            self._emit(trailing)
+
+    def _set_progress(self, value: int) -> None:
+        value = min(TRAINING_PROGRESS_END, value)
+        if value > self._last_progress:
+            self._last_progress = value
+            self._progress(value)
 
 
 class InstantNGPReconstructionEngine(ReconstructionEngine):
@@ -115,13 +183,10 @@ class InstantNGPReconstructionEngine(ReconstructionEngine):
         emit("Training...")
         progress(20)
 
-        line_count = 0
-
-        def on_line(line: str) -> None:
-            nonlocal line_count
-            line_count += 1
-            if line_count % 25 == 0:
-                progress(min(95, 20 + line_count // 25))
+        metrics = TrainingMetricsTracker()
+        on_line = TrainingOutputForwarder(emit=emit, progress=progress, metrics=metrics)
+        sampler = PeakGpuMemorySampler(lambda: self._launcher.active_pid(job.id))
+        sampler.start()
 
         try:
             return_code = self._launcher.run_training(
@@ -139,6 +204,8 @@ class InstantNGPReconstructionEngine(ReconstructionEngine):
                 message=str(exc),
                 error_code=_error_code_from_message(str(exc)),
             )
+        finally:
+            peak_vram_mib = sampler.stop()
 
         if return_code != 0:
             message = _read_tail(training_log_path) or f"Instant-NGP exited with code {return_code}"
@@ -169,6 +236,13 @@ class InstantNGPReconstructionEngine(ReconstructionEngine):
                 "training_log_path": str(training_log_path.relative_to(output_dir.parent)),
                 "checkpoints_dir": checkpoints_dir.name,
                 "scene_dir": str(scene_dir.relative_to(output_dir.parent)),
+                "training_metrics": {
+                    **metrics.to_dict(),
+                    "checkpoint_count": count_checkpoints(output_dir),
+                    "peak_vram_mib": peak_vram_mib,
+                    "vram_samples": sampler.samples,
+                    "source": "pipeline",
+                },
             },
         )
 

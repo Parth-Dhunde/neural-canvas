@@ -72,6 +72,7 @@ class ReconstructionService:
             reconstruction_completed_at=completed_at,
             engine=job.engine,
             snapshot_path=result.snapshot_path,
+            training_metrics=result.data.get("training_metrics"),
         )
 
         return {

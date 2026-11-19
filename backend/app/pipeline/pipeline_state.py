@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from app.core.text import strip_ansi
 from app.jobs.pipeline_repository import PipelineRepository
 from app.models.job import utc_now_iso
 from app.pipeline.constants import CAMERA_ESTIMATION_STAGE_ID, PIPELINE_STAGE_DEFINITIONS, TRAINING_STAGE_ID
@@ -91,6 +92,7 @@ class PipelineState:
         paused_at: str | None = None,
         cancelled_at: str | None = None,
         last_error: str | None = None,
+        clear_last_error: bool = False,
     ) -> dict[str, Any]:
         document = self.load(job_id)
         execution = document["execution"]
@@ -104,8 +106,35 @@ class PipelineState:
             execution["paused_at"] = paused_at
         if cancelled_at is not None:
             execution["cancelled_at"] = cancelled_at
-        if last_error is not None:
+        if clear_last_error:
+            execution["last_error"] = None
+        elif last_error is not None:
             execution["last_error"] = last_error
+        return self.save(job_id, document)
+
+    def reset_stages_from(self, job_id: str, stage_id: int) -> dict[str, Any]:
+        """Return ``stage_id`` and every later stage to ``waiting`` for a rerun.
+
+        Earlier stages and on-disk artifacts are left untouched. Reset stages are tagged
+        with ``reset_at`` so ``reconcile_with_job`` does not mark them completed again
+        from artifacts left over by the previous run.
+        """
+        document = self.load(job_id)
+        reset_at = utc_now_iso()
+        for stage in document["stages"]:
+            if stage["id"] < stage_id:
+                continue
+            stage["status"] = "waiting"
+            stage["progress"] = 0
+            stage["completed_at"] = None
+            stage["reset_at"] = reset_at
+
+        execution = document["execution"]
+        execution["status"] = "idle"
+        execution["current_stage_id"] = None
+        execution["paused_at"] = None
+        execution["cancelled_at"] = None
+        execution["last_error"] = None
         return self.save(job_id, document)
 
     def mark_stage_before(self, job_id: str, stage_id: int) -> dict[str, Any]:
@@ -116,6 +145,7 @@ class PipelineState:
             status="running",
             progress=0,
             completed_at=None,
+            started_at=utc_now_iso(),
         )
 
     def mark_stage_running(self, job_id: str, stage_id: int, *, progress: int) -> dict[str, Any]:
@@ -139,7 +169,7 @@ class PipelineState:
                 continue
             stage["status"] = "failed"
             break
-        document["execution"]["last_error"] = message
+        document["execution"]["last_error"] = strip_ansi(message)
         return self.save(job_id, document)
 
     def mark_stage_waiting(self, job_id: str, stage_id: int) -> dict[str, Any]:
@@ -159,6 +189,7 @@ class PipelineState:
         status: str | None = None,
         progress: int | None = None,
         completed_at: str | None = None,
+        started_at: str | None = None,
     ) -> dict[str, Any]:
         document = self.load(job_id)
         for stage in document["stages"]:
@@ -170,6 +201,8 @@ class PipelineState:
                 stage["progress"] = progress
             if completed_at is not None:
                 stage["completed_at"] = completed_at
+            if started_at is not None:
+                stage["started_at"] = started_at
             break
         return self.save(job_id, document)
 
@@ -195,13 +228,15 @@ class PipelineState:
         reconstruction_completed_at: str | None = None,
     ) -> dict[str, Any]:
         document = self.load(job_id)
+        changed = False
 
         if image_count > 0:
             for stage in document["stages"]:
                 if stage["id"] != 1:
                     continue
-                if stage["status"] == "waiting":
+                if stage["status"] == "waiting" and "reset_at" not in stage:
                     stage["status"] = "completed"
+                    changed = True
                     stage["progress"] = 100
                     stage["completed_at"] = uploaded_at or utc_now_iso()
                 break
@@ -210,8 +245,9 @@ class PipelineState:
             for stage in document["stages"]:
                 if stage["id"] != 2:
                     continue
-                if stage["status"] == "waiting":
+                if stage["status"] == "waiting" and "reset_at" not in stage:
                     stage["status"] = "completed"
+                    changed = True
                     stage["progress"] = 100
                     stage["completed_at"] = utc_now_iso()
                 break
@@ -220,8 +256,9 @@ class PipelineState:
             for stage in document["stages"]:
                 if stage["id"] != CAMERA_ESTIMATION_STAGE_ID:
                     continue
-                if stage["status"] == "waiting":
+                if stage["status"] == "waiting" and "reset_at" not in stage:
                     stage["status"] = "completed"
+                    changed = True
                     stage["progress"] = 100
                     stage["completed_at"] = camera_estimated_at or utc_now_iso()
                 break
@@ -230,12 +267,17 @@ class PipelineState:
             for stage in document["stages"]:
                 if stage["id"] != TRAINING_STAGE_ID:
                     continue
-                if stage["status"] == "waiting":
+                if stage["status"] == "waiting" and "reset_at" not in stage:
                     stage["status"] = "completed"
+                    changed = True
                     stage["progress"] = 100
                     stage["completed_at"] = reconstruction_completed_at or utc_now_iso()
                 break
 
+        # Only write when artifacts changed something, so polling GET /pipeline stays read-only
+        # and cannot overwrite progress persisted concurrently by a running stage.
+        if not changed:
+            return document
         return self.save(job_id, document)
 
     def recover_after_restart(self, job_id: str) -> dict[str, Any]:

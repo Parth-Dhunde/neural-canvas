@@ -1,35 +1,72 @@
-# Python
-backend/.venv/
-backend/__pycache__/
-backend/**/*.pyc
-
 # Node
+node_modules/
 frontend/node_modules/
-frontend/.next/
 frontend/dist/
+frontend/dist-ssr/
 frontend/build/
+frontend/.output/
+frontend/.vinxi/
+frontend/.tanstack/
+frontend/.nitro/
+frontend/.wrangler/
 
-# Environment
-backend/.env
-frontend/.env
-frontend/.env.local
+# Python
+.venv/
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
 
-# Logs
+# Environment (examples are committed; real values never are)
+.env
+.env.*
+!.env.example
+frontend/.dev.vars
+
+# Runtime data. Anchored with a leading "/": an unanchored "jobs/" also matched the
+# source package backend/app/jobs/ and silently kept new modules out of git.
+/jobs/
+/backend/jobs/
+/uploads/
+/backend/uploads/
+/outputs/
+/backend/outputs/
+/logs/
+/backend/logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# macOS
-.DS_Store
-
-# VS Code
-.vscode/
-
-# Cursor
-.cursor/
-
-# Uploads
-backend/jobs/
-backend/uploads/
-backend/outputs/
+# Engine outputs and model weights (generated or downloaded, never source)
+*.msgpack
+*.onnx
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+*.npy
 
 # Cache
-.pytest_cache/
+.cache/
+*.tsbuildinfo
+.eslintcache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Internal working notes (kept locally, never published)
+docs/PROJECT_AUDIT.md

@@ -1,0 +1,737 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+/* Desktop sidebar collapsed to its icon rail (html[data-sidebar], set before first paint). */
+@custom-variant rail (&:where(html[data-sidebar="collapsed"] *));
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-panel: var(--panel);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle: var(--subtle);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-bronze: var(--bronze);
+  --color-bronze-foreground: var(--bronze-foreground);
+  --color-bronze-muted: var(--bronze-muted);
+  --color-warm: var(--warm);
+  --color-warm-foreground: var(--warm-foreground);
+  --color-selected: var(--selected);
+  --color-highlight: var(--highlight);
+  --color-ivory: var(--ivory);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-viewport: var(--viewport);
+}
+/*
+ * Hand-written rules below reference the raw tokens (var(--border), not var(--color-border)):
+ * the --color-* aliases resolve once at :root, so they would ignore scoped token sets such as
+ * .nc-console and the light theme's espresso surfaces.
+ */
+
+/*
+ * Theme tokens. Both themes define the same semantic tokens; components use only these.
+ * Dark ("Graphite", the NeuralCanvas default) lives on :root so pages render dark without
+ * JavaScript; html.light ("Sand") overrides the same tokens. The terminal always uses the
+ * dark console scope (.nc-console, below) in both themes.
+ *
+ * Roles: --bronze is the copper *accent* (actions, brand marks; utilities `text-bronze` etc.);
+ * --warm is the primary call to action; --selected (cyan/soft blue) marks selected and focused
+ * interactive elements and technical information; --highlight (champagne in dark, lavender in
+ * light) tints selected surfaces; --ivory is high-emphasis text. Gradient tokens (--ambient,
+ * --panel-gradient, --panel-edge, --tile-gradient, --sidebar-gradient, --topbar-gradient,
+ * --cta-gradient) are consumed by the utilities further down and kept deliberately subtle.
+ */
+:root {
+  --radius: 6px;
+
+  /* Surfaces — blue-tinted graphite, stepping lighter toward the viewer; text stays warm */
+  --background: oklch(0.142 0.014 258);
+  --foreground: oklch(0.905 0.01 84);
+  --surface: oklch(0.172 0.016 258);
+  --surface-2: oklch(0.21 0.018 258);
+  --surface-3: oklch(0.25 0.02 258);
+  --panel: oklch(0.188 0.016 258);
+
+  --card: oklch(0.188 0.016 258);
+  --card-foreground: oklch(0.905 0.01 84);
+  --popover: oklch(0.222 0.019 258);
+  --popover-foreground: oklch(0.905 0.01 84);
+
+  --border: oklch(0.29 0.02 258);
+  --border-strong: oklch(0.4 0.024 258);
+  --input: oklch(0.335 0.022 258);
+  --ring: oklch(0.8 0.095 212);
+
+  --muted: oklch(0.23 0.018 258);
+  --muted-foreground: oklch(0.755 0.012 80);
+  --subtle: oklch(0.655 0.014 250);
+
+  --primary: oklch(0.935 0.012 84);
+  --primary-foreground: oklch(0.17 0.014 258);
+  --secondary: oklch(0.255 0.019 258);
+  --secondary-foreground: oklch(0.905 0.01 84);
+  --accent: oklch(0.27 0.025 258);
+  --accent-foreground: oklch(0.935 0.012 84);
+
+  /* Copper accent — richer than before, still warm metal rather than orange */
+  --bronze: oklch(0.775 0.11 58);
+  --bronze-foreground: oklch(0.17 0.012 55);
+  --bronze-muted: oklch(0.53 0.08 55);
+
+  /* Primary call to action */
+  --warm: oklch(0.79 0.125 62);
+  --warm-foreground: oklch(0.19 0.025 55);
+
+  /* Selection / focus (restrained cyan) and selected-surface tint (champagne) */
+  --selected: oklch(0.8 0.095 212);
+  --highlight: oklch(0.875 0.055 84);
+
+  /* High-emphasis text — champagne white */
+  --ivory: oklch(0.962 0.012 86);
+
+  --destructive: oklch(0.69 0.17 28);
+  --destructive-foreground: oklch(0.98 0.006 80);
+  --success: oklch(0.76 0.14 152);
+  --warning: oklch(0.83 0.13 86);
+  --info: oklch(0.8 0.095 212);
+
+  --chart-1: oklch(0.775 0.11 58);
+  --chart-2: oklch(0.76 0.14 152);
+  --chart-3: oklch(0.83 0.13 86);
+  --chart-4: oklch(0.69 0.17 28);
+  --chart-5: oklch(0.8 0.095 212);
+
+  --sidebar: oklch(0.15 0.015 258);
+  --sidebar-foreground: oklch(0.87 0.01 80);
+  --sidebar-primary: oklch(0.775 0.11 58);
+  --sidebar-primary-foreground: oklch(0.17 0.012 55);
+  --sidebar-accent: oklch(0.22 0.019 258);
+  --sidebar-accent-foreground: oklch(0.945 0.012 84);
+  --sidebar-border: oklch(0.26 0.018 258);
+  --sidebar-ring: oklch(0.8 0.095 212);
+
+  --viewport: oklch(0.12 0.013 258);
+  --terminal-bg: oklch(0.135 0.004 60);
+  --panel-shadow:
+    0 1px 0 oklch(1 0 0 / 0.055) inset, 0 0 0 1px oklch(0 0 0 / 0.2),
+    0 2px 6px oklch(0.05 0.01 258 / 0.3), 0 18px 40px -20px oklch(0.05 0.02 258 / 0.85);
+  --grid-line: oklch(1 0 0 / 0.028);
+  --noise-opacity: 0;
+  --scrollbar-thumb: oklch(0.34 0.02 258);
+  --scrollbar-thumb-hover: oklch(0.46 0.024 258);
+  --shimmer: oklch(1 0 0 / 0.06);
+  --scan: oklch(1 0 0 / 0.03);
+
+  /* Copper light from the top left, a champagne wash top right, cool blue pooling below */
+  --ambient:
+    radial-gradient(1100px 560px at 0% 0%, oklch(0.34 0.07 55 / 0.34), transparent 62%),
+    radial-gradient(900px 460px at 100% 0%, oklch(0.34 0.04 85 / 0.14), transparent 60%),
+    radial-gradient(1000px 640px at 80% 100%, oklch(0.3 0.06 245 / 0.34), transparent 66%),
+    linear-gradient(180deg, oklch(0.158 0.015 258), oklch(0.132 0.013 258));
+  --panel-gradient: linear-gradient(180deg, oklch(0.218 0.018 258), oklch(0.186 0.016 258) 60%);
+  --panel-edge: linear-gradient(90deg, transparent, oklch(0.8 0.09 68 / 0.42), transparent);
+  --panel-header: oklch(0.205 0.018 258 / 0.7);
+  --tile-gradient: linear-gradient(160deg, oklch(0.24 0.02 258), oklch(0.205 0.017 258));
+  --sidebar-gradient:
+    radial-gradient(340px 240px at 0% 0%, oklch(0.31 0.06 55 / 0.34), transparent 70%),
+    radial-gradient(300px 320px at 0% 100%, oklch(0.25 0.045 245 / 0.32), transparent 72%),
+    linear-gradient(180deg, oklch(0.168 0.016 258), oklch(0.138 0.014 258));
+  --topbar-gradient: linear-gradient(
+    90deg,
+    oklch(0.182 0.018 258),
+    oklch(0.172 0.016 252) 60%,
+    oklch(0.19 0.024 238)
+  );
+  --cta-gradient: linear-gradient(180deg, oklch(0.815 0.12 66), oklch(0.7 0.125 54));
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/*
+ * Dark-only depth and interaction polish. Scoped to html:not(.light) so the light theme never
+ * picks these up; the terminal (.nc-console) keeps its own pinned look in both themes.
+ */
+/* Chrome: a faint copper/champagne hairline where the bars meet the workspace. */
+html:not(.light) .nc-chrome {
+  box-shadow:
+    inset 0 -1px 0 oklch(0.8 0.07 70 / 0.12),
+    0 6px 18px -14px oklch(0.04 0.01 258 / 0.9);
+}
+html:not(.light) .nc-chrome.nc-chrome-footer {
+  box-shadow: inset 0 1px 0 oklch(0.8 0.07 70 / 0.1);
+}
+/* Sidebar: sits a step behind the workspace, with a soft shadow along its edge. */
+html:not(.light) .nc-sidebar {
+  box-shadow:
+    inset -1px 0 0 oklch(1 0 0 / 0.025),
+    10px 0 28px -22px oklch(0.03 0.01 258 / 0.95);
+}
+/* Page title band: a low copper wash fading out to the right. */
+html:not(.light) .nc-page-header {
+  background-image: linear-gradient(
+    90deg,
+    oklch(0.25 0.035 58 / 0.28),
+    oklch(0.2 0.015 258 / 0.18) 55%,
+    transparent
+  );
+  border-bottom-color: oklch(0.3 0.016 258);
+}
+/* Panel header strips: a little lift over the panel body. */
+html:not(.light) .nc-panel-header {
+  background-image: linear-gradient(
+    180deg,
+    oklch(0.225 0.014 258 / 0.75),
+    oklch(0.2 0.013 258 / 0.55)
+  );
+}
+/* Active navigation: a cyan tint that fades across the item, plus a glowing marker. */
+html:not(.light) .nc-nav-active {
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--selected) 16%, transparent),
+    color-mix(in oklch, var(--selected) 5%, transparent) 75%
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--selected) 24%, transparent),
+    0 4px 14px -10px color-mix(in oklch, var(--selected) 60%, transparent);
+}
+html:not(.light) .nc-nav-active > .bg-selected {
+  box-shadow: 0 0 8px color-mix(in oklch, var(--selected) 70%, transparent);
+}
+/* Primary call to action: the one place a warm glow is used. */
+html:not(.light) .nc-cta:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.28),
+    0 0 0 1px oklch(0.78 0.12 62 / 0.2),
+    0 8px 20px -10px oklch(0.75 0.13 60 / 0.55);
+}
+html:not(.light) .nc-cta:not(:disabled):hover {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.32),
+    0 0 0 1px oklch(0.8 0.12 62 / 0.3),
+    0 10px 24px -10px oklch(0.78 0.13 60 / 0.65);
+}
+/* Small tiles inside panels: a hairline top highlight for depth. */
+html:not(.light) .nc-tile {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.035);
+}
+/*
+ * Form controls: a brighter edge on hover and a soft cyan halo around the focus ring. In the
+ * base layer, so component utility classes still win; the terminal is excluded.
+ */
+@layer base {
+  html:not(.light) :where(select, input, textarea):not(.nc-console *):hover {
+    border-color: oklch(0.47 0.02 258);
+  }
+  html:not(.light)
+    :where(button, [role="button"], a, select, input, textarea, summary):not(
+      .nc-console *
+    ):focus-visible {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--ring) 18%, transparent);
+  }
+}
+
+/* Light ("Sand") — sand, taupe and champagne layers with a lavender haze; slate text. */
+html.light {
+  color-scheme: light;
+
+  --background: oklch(0.922 0.016 74);
+  --foreground: oklch(0.31 0.02 265);
+  --surface: oklch(0.945 0.013 78);
+  --surface-2: oklch(0.968 0.009 82);
+  --surface-3: oklch(0.905 0.017 72);
+  --panel: oklch(0.952 0.012 80);
+
+  --card: oklch(0.952 0.012 80);
+  --card-foreground: oklch(0.31 0.02 265);
+  --popover: oklch(0.972 0.008 82);
+  --popover-foreground: oklch(0.31 0.02 265);
+
+  --border: oklch(0.85 0.02 70);
+  --border-strong: oklch(0.74 0.026 62);
+  --input: oklch(0.8 0.024 66);
+  --ring: oklch(0.52 0.12 245);
+
+  --muted: oklch(0.925 0.015 76);
+  --muted-foreground: oklch(0.43 0.022 262);
+  --subtle: oklch(0.49 0.022 262);
+
+  --primary: oklch(0.26 0.022 265);
+  --primary-foreground: oklch(0.975 0.008 82);
+  --secondary: oklch(0.915 0.016 74);
+  --secondary-foreground: oklch(0.31 0.02 265);
+  --accent: oklch(0.9 0.03 300);
+  --accent-foreground: oklch(0.26 0.022 265);
+
+  /* Muted copper accent */
+  --bronze: oklch(0.52 0.1 48);
+  --bronze-foreground: oklch(0.98 0.008 84);
+  --bronze-muted: oklch(0.73 0.06 58);
+
+  --warm: oklch(0.56 0.11 48);
+  --warm-foreground: oklch(0.985 0.006 84);
+
+  /* Selection / focus (soft blue) and selected-surface tint (lavender) */
+  --selected: oklch(0.52 0.12 245);
+  --highlight: oklch(0.6 0.09 295);
+
+  /* High-emphasis text — charcoal slate */
+  --ivory: oklch(0.23 0.022 265);
+
+  --destructive: oklch(0.51 0.18 28);
+  --destructive-foreground: oklch(0.985 0.006 84);
+  --success: oklch(0.47 0.12 152);
+  --warning: oklch(0.52 0.12 70);
+  --info: oklch(0.52 0.12 245);
+
+  --chart-1: oklch(0.52 0.1 48);
+  --chart-2: oklch(0.47 0.12 152);
+  --chart-3: oklch(0.52 0.12 70);
+  --chart-4: oklch(0.51 0.18 28);
+  --chart-5: oklch(0.52 0.12 245);
+
+  --sidebar: oklch(0.905 0.02 65);
+  --sidebar-foreground: oklch(0.32 0.02 265);
+  --sidebar-primary: oklch(0.52 0.1 48);
+  --sidebar-primary-foreground: oklch(0.98 0.008 84);
+  --sidebar-accent: oklch(0.87 0.03 300);
+  --sidebar-accent-foreground: oklch(0.22 0.022 265);
+  --sidebar-border: oklch(0.835 0.022 66);
+  --sidebar-ring: oklch(0.52 0.12 245);
+
+  --viewport: oklch(0.905 0.018 72);
+  --terminal-bg: oklch(0.135 0.004 60);
+  --panel-shadow:
+    0 1px 0 oklch(1 0 0 / 0.65) inset, 0 0 0 1px oklch(0.45 0.03 60 / 0.04),
+    0 1px 2px oklch(0.35 0.03 55 / 0.08), 0 12px 28px -16px oklch(0.35 0.04 60 / 0.25);
+  --grid-line: oklch(0.35 0.03 60 / 0.06);
+  --noise-opacity: 0;
+  --scrollbar-thumb: oklch(0.78 0.022 66);
+  --scrollbar-thumb-hover: oklch(0.68 0.028 62);
+  --shimmer: oklch(1 0 0 / 0.55);
+  --scan: oklch(0.35 0.03 60 / 0.03);
+
+  --ambient:
+    radial-gradient(1000px 540px at 0% 0%, oklch(0.975 0.022 86 / 0.9), transparent 62%),
+    radial-gradient(950px 560px at 100% 0%, oklch(0.885 0.045 300 / 0.75), transparent 64%),
+    radial-gradient(900px 600px at 55% 100%, oklch(0.865 0.03 58 / 0.7), transparent 66%),
+    linear-gradient(180deg, oklch(0.94 0.015 80), oklch(0.9 0.02 68));
+  --panel-gradient: linear-gradient(180deg, oklch(0.966 0.011 82), oklch(0.944 0.014 76) 60%);
+  --panel-edge: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.9), transparent);
+  --panel-header: oklch(0.928 0.02 74 / 0.75);
+  --tile-gradient: linear-gradient(160deg, oklch(0.975 0.008 84), oklch(0.955 0.012 78));
+  --sidebar-gradient:
+    radial-gradient(340px 300px at 0% 100%, oklch(0.85 0.05 300 / 0.75), transparent 72%),
+    linear-gradient(180deg, oklch(0.915 0.022 70), oklch(0.88 0.026 62));
+  --topbar-gradient: linear-gradient(90deg, oklch(0.945 0.016 80), oklch(0.925 0.03 300));
+  --cta-gradient: linear-gradient(180deg, oklch(0.6 0.11 50), oklch(0.52 0.105 45));
+}
+
+/*
+ * Terminal console: always dark, in both themes. Redefines the tokens its contents use, so
+ * html.light cannot lighten it (custom properties set here win over inherited ones).
+ */
+.nc-console {
+  color-scheme: dark;
+  --background: oklch(0.135 0.004 60);
+  --foreground: oklch(0.88 0.006 80);
+  --surface: oklch(0.165 0.005 60);
+  --surface-2: oklch(0.2 0.006 60);
+  --surface-3: oklch(0.24 0.008 60);
+  --popover: oklch(0.21 0.006 60);
+  --border: oklch(0.27 0.007 60);
+  --border-strong: oklch(0.36 0.01 60);
+  --input: oklch(0.3 0.008 60);
+  --muted-foreground: oklch(0.74 0.008 75);
+  --subtle: oklch(0.6 0.01 70);
+  --ivory: oklch(0.95 0.008 85);
+  --bronze: oklch(0.75 0.095 60);
+  --selected: oklch(0.79 0.1 210);
+  --ring: oklch(0.79 0.1 210);
+  --success: oklch(0.76 0.15 152);
+  --warning: oklch(0.83 0.13 86);
+  --destructive: oklch(0.7 0.17 28);
+  --info: oklch(0.79 0.1 210);
+  --terminal-bg: oklch(0.13 0.004 60);
+  --scrollbar-thumb: oklch(0.34 0.008 60);
+  --scrollbar-thumb-hover: oklch(0.44 0.01 60);
+  color: var(--foreground);
+  background-color: var(--surface);
+  background-image: linear-gradient(180deg, oklch(0.172 0.005 60), oklch(0.152 0.004 60));
+  box-shadow:
+    0 -1px 0 oklch(0 0 0 / 0.35),
+    0 -10px 24px -16px oklch(0 0 0 / 0.45);
+}
+
+/*
+ * Light theme: dark espresso accent surfaces. The top bar, status bar, panel header strips and
+ * small information cards switch to a walnut/espresso token set (with cream text) so the light
+ * workspace gains contrast without becoming a dark theme. Dark mode is unaffected.
+ */
+html.light .nc-chrome,
+html.light .nc-panel-header,
+html.light .nc-nav-active {
+  color-scheme: dark;
+  --surface: oklch(0.28 0.026 55);
+  --surface-2: oklch(0.32 0.029 56);
+  --surface-3: oklch(0.36 0.031 57);
+  --popover: oklch(0.3 0.027 55);
+  --popover-foreground: oklch(0.93 0.02 85);
+  --border: oklch(0.39 0.03 58);
+  --border-strong: oklch(0.48 0.036 62);
+  --input: oklch(0.41 0.03 58);
+  --foreground: oklch(0.92 0.02 85);
+  --ivory: oklch(0.965 0.018 88);
+  --muted-foreground: oklch(0.82 0.025 80);
+  --subtle: oklch(0.75 0.035 76);
+  --bronze: oklch(0.79 0.09 64);
+  --bronze-foreground: oklch(0.2 0.02 55);
+  --warm: oklch(0.79 0.105 66);
+  --warm-foreground: oklch(0.2 0.025 55);
+  --cta-gradient: linear-gradient(180deg, oklch(0.82 0.1 70), oklch(0.72 0.11 58));
+  --selected: oklch(0.83 0.08 215);
+  --ring: oklch(0.83 0.08 215);
+  --info: oklch(0.83 0.08 215);
+  --success: oklch(0.8 0.14 150);
+  --warning: oklch(0.85 0.12 86);
+  --destructive: oklch(0.74 0.16 28);
+  --highlight: oklch(0.86 0.045 85);
+  --scrollbar-thumb: oklch(0.45 0.03 58);
+  color: var(--foreground);
+}
+
+html.light .nc-chrome {
+  --topbar-gradient: linear-gradient(
+    90deg,
+    oklch(0.235 0.026 48),
+    oklch(0.29 0.03 58) 55%,
+    oklch(0.255 0.026 44)
+  );
+  background-color: oklch(0.26 0.027 52);
+  background-image: var(--topbar-gradient);
+  /* Champagne hairline where the dark chrome meets the light workspace. */
+  box-shadow: inset 0 -1px 0 oklch(0.82 0.06 80 / 0.22);
+}
+html.light footer.nc-chrome,
+html.light .nc-chrome.nc-chrome-footer {
+  box-shadow: inset 0 1px 0 oklch(0.82 0.06 80 / 0.18);
+}
+
+html.light .nc-panel-header {
+  background-color: oklch(0.31 0.028 55);
+  background-image:
+    linear-gradient(90deg, transparent, oklch(0.84 0.07 75 / 0.35), transparent),
+    linear-gradient(180deg, oklch(0.335 0.03 56), oklch(0.295 0.027 52));
+  background-size:
+    100% 1px,
+    100% 100%;
+  background-repeat: no-repeat;
+  border-bottom-color: oklch(0.25 0.025 50);
+}
+
+/* Taupe band behind page titles (light); the dark theme keeps its translucent surface. */
+html.light .nc-page-header {
+  background-image: linear-gradient(
+    90deg,
+    oklch(0.885 0.024 66 / 0.9),
+    oklch(0.915 0.02 74 / 0.75) 55%,
+    oklch(0.93 0.02 300 / 0.35)
+  );
+  border-bottom-color: oklch(0.8 0.028 62);
+}
+
+/* Active navigation item: selected tint in dark, a walnut chip in light. */
+.nc-nav-active {
+  background-color: color-mix(in oklch, var(--selected) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--selected) 25%, transparent);
+  color: var(--ivory);
+}
+html.light .nc-nav-active {
+  background-color: oklch(0.31 0.028 55);
+  background-image: linear-gradient(90deg, oklch(0.34 0.03 56), oklch(0.29 0.027 52));
+  box-shadow:
+    0 1px 2px oklch(0.25 0.03 50 / 0.25),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+
+/* Sidebar: width comes from --nc-sidebar-w (set before first paint, see lib/sidebarLayout). */
+@media (min-width: 1024px) {
+  #app-navigation {
+    width: var(--nc-sidebar-w, 224px);
+    transition: width 180ms ease;
+  }
+}
+html[data-sidebar-resizing],
+html[data-sidebar-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+html[data-sidebar-resizing] #app-navigation {
+  transition: none;
+}
+
+/* Smooth theme switching: applied briefly by setThemePreference, not on every hover. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    color 220ms ease,
+    fill 220ms ease,
+    stroke 220ms ease,
+    box-shadow 220ms ease !important;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+
+  /* Fine grid texture for workspace surfaces */
+  .nc-grid {
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .nc-noise {
+    position: relative;
+  }
+  .nc-noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: var(--noise-opacity);
+    mix-blend-mode: overlay;
+    background-image: radial-gradient(oklch(1 0 0 / 0.6) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+
+  /* Focus ring — visible keyboard focus in both themes */
+  :where(button, [role="button"], input, textarea, select, a, summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+}
+
+@utility panel {
+  background-color: var(--panel);
+  /* A 1px illuminated top edge over the panel gradient. */
+  background-image: var(--panel-edge), var(--panel-gradient);
+  background-size:
+    100% 1px,
+    100% 100%;
+  background-repeat: no-repeat;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--panel-shadow);
+}
+
+/* Surface gradients (tokens above); each keeps its solid token as the fallback colour. */
+@utility nc-ambient {
+  background-color: var(--background);
+  background-image: var(--ambient);
+  background-attachment: local;
+}
+@utility nc-sidebar {
+  background-color: var(--sidebar);
+  background-image: var(--sidebar-gradient);
+}
+@utility nc-topbar {
+  background-color: var(--surface);
+  background-image: var(--topbar-gradient);
+}
+@utility nc-tile {
+  background-color: var(--surface-2);
+  background-image: var(--tile-gradient);
+}
+@utility nc-panel-header {
+  background-color: var(--panel-header);
+}
+@utility nc-cta {
+  background-color: var(--warm);
+  background-image: var(--cta-gradient);
+}
+
+@utility terminal-body {
+  background-color: var(--terminal-bg);
+  color: var(--foreground);
+}
+
+@utility hairline-b {
+  border-bottom: 1px solid var(--border);
+}
+@utility hairline-t {
+  border-top: 1px solid var(--border);
+}
+@utility hairline-r {
+  border-right: 1px solid var(--border);
+}
+@utility hairline-l {
+  border-left: 1px solid var(--border);
+}
+
+@utility mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero", "ss01";
+  letter-spacing: -0.01em;
+}
+
+@utility label-caps {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 500;
+}
+
+@keyframes nc-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.nc-live-dot {
+  animation: nc-pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes nc-scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+.nc-scan::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 30%;
+  background: linear-gradient(to bottom, transparent, var(--scan), transparent);
+  animation: nc-scan 4.5s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes nc-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+.nc-shimmer {
+  background: linear-gradient(90deg, transparent, var(--shimmer), transparent);
+  background-size: 400px 100%;
+  animation: nc-shimmer 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-live-dot,
+  .nc-shimmer,
+  .nc-scan::before {
+    animation: none;
+  }
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: none !important;
+  }
+}

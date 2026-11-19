@@ -96,6 +96,7 @@ class InstantNGPMeshGenerationEngine(MeshGenerationEngine):
             if match:
                 vertex_count = int(match.group(1))
                 triangle_count = int(match.group(2))
+            emit(line)
 
         try:
             return_code = self._launcher.extract_mesh(

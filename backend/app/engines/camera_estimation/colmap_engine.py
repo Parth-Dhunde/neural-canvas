@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
+from app.core.text import strip_ansi
 from app.core.logging import get_logger
 from app.engines.camera_estimation.base import (
     CameraEstimationEngine,
@@ -15,6 +17,15 @@ from app.engines.camera_estimation.base import (
     ControlCallback,
     LogCallback,
     ProgressCallback,
+)
+from app.engines.camera_estimation.colmap_validation import (
+    MIN_REGISTERED_IMAGES,
+    infer_mapper_failure_message,
+    reconstruction_failure_message,
+    registered_image_count,
+    registration_ratio_failure_message,
+    sparse_model_has_files,
+    sparse_model_is_usable,
 )
 from app.engines.camera_estimation.transforms_export import export_transforms_json
 from app.jobs.repository import JobRepository
@@ -30,10 +41,12 @@ from app.jobs.structure import (
     masked_images_path,
 )
 from app.models.job import Job
+from app.pipeline.pipeline_manager import PipelineControlError
 
 logger = get_logger(__name__)
 
 MIN_MASKED_IMAGES = 2
+SPARSE_TEXT_DIR = "model_text"
 
 
 class ColmapCameraEstimationEngine(CameraEstimationEngine):
@@ -50,17 +63,22 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
         self._repository = repository or JobRepository()
 
     def validate(self, job: Job) -> CameraEstimationResult:
-        if shutil.which(self._settings.colmap_binary) is None:
+        binary_error = self._binary_validation_error()
+        if binary_error is not None:
+            return binary_error
+
+        masked_dir = masked_images_path(self._repository.jobs_root, job.id)
+        if not masked_dir.is_dir():
             return CameraEstimationResult(
                 success=False,
                 message=(
-                    f"COLMAP is unavailable. Install COLMAP or set COLMAP_BINARY "
-                    f"to the executable path. Attempted: {self._settings.colmap_binary!r}"
+                    f"Masked images directory not found: {masked_dir}. "
+                    "Complete background removal before camera estimation."
                 ),
-                error_code="COLMAP_UNAVAILABLE",
+                error_code="VALIDATION_FAILED",
             )
 
-        image_count = self._count_masked_images(job.id)
+        image_count = self._count_images(masked_dir)
         if image_count < MIN_MASKED_IMAGES:
             return CameraEstimationResult(
                 success=False,
@@ -96,13 +114,22 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
         database_path = camera_database_path(jobs_root, job.id)
         sparse_dir = camera_sparse_path(jobs_root, job.id)
         transforms_path = camera_transforms_file(jobs_root, job.id)
+        text_model_dir = camera_dir / SPARSE_TEXT_DIR
+        eligible_images = int(validation.data.get("masked_image_count", 0))
+
+        # A fresh run must not select sparse models or reuse transforms from an earlier attempt.
+        if database_path.exists():
+            database_path.unlink()
+        if text_model_dir.exists():
+            shutil.rmtree(text_model_dir)
+        if sparse_dir.exists():
+            shutil.rmtree(sparse_dir)
+        if transforms_path.exists():
+            transforms_path.unlink()
 
         camera_dir.mkdir(parents=True, exist_ok=True)
         sparse_dir.mkdir(parents=True, exist_ok=True)
         transforms_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if database_path.exists():
-            database_path.unlink()
 
         emit = _make_logger(log)
         progress = on_progress or (lambda _value: None)
@@ -123,6 +150,8 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                     "--ImageReader.single_camera",
                     "1",
                 ],
+                emit=emit,
+                check=check,
             )
             progress(25)
 
@@ -134,12 +163,14 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                     "--database_path",
                     str(database_path),
                 ],
+                emit=emit,
+                check=check,
             )
             progress(50)
 
             check()
             emit("Sparse reconstruction...")
-            self._run_colmap(
+            mapper_output = self._run_colmap(
                 "mapper",
                 [
                     "--database_path",
@@ -149,40 +180,97 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                     "--output_path",
                     str(sparse_dir),
                 ],
+                emit=emit,
+                check=check,
             )
-            progress(80)
+            progress(75)
 
-            sparse_model = self._resolve_sparse_model(sparse_dir)
-            if sparse_model is None:
+            # The mapper may log "no good initial image pair" while failing to start an
+            # additional model after a good one, so usable models take precedence over logs.
+            sparse_model, registered_images = self._find_best_sparse_model(
+                sparse_dir=sparse_dir,
+                text_model_dir=text_model_dir,
+                emit=emit,
+                check=check,
+            )
+            if sparse_model is None or registered_images < MIN_REGISTERED_IMAGES:
+                message = reconstruction_failure_message(
+                    mapper_output=mapper_output,
+                    registered_images=registered_images,
+                )
+                if sparse_model is None and infer_mapper_failure_message(mapper_output):
+                    message = infer_mapper_failure_message(mapper_output) or message
+                message = (
+                    f"{message} Registered {registered_images}/{eligible_images} "
+                    "eligible images."
+                )
+                emit(message, level="error")
                 return CameraEstimationResult(
                     success=False,
-                    message="COLMAP sparse reconstruction produced no model.",
+                    message=message,
                     error_code="SPARSE_RECONSTRUCTION_FAILED",
+                    registered_images=registered_images,
+                    data={"eligible_images": eligible_images},
+                )
+
+            emit(
+                f"Selected sparse model {sparse_model.name}: "
+                f"{registered_images}/{eligible_images} eligible images registered."
+            )
+            ratio_failure = registration_ratio_failure_message(
+                registered_images=registered_images,
+                eligible_images=eligible_images,
+                min_ratio=self._settings.colmap_min_registration_ratio,
+            )
+            if ratio_failure is not None:
+                emit(ratio_failure, level="error")
+                return CameraEstimationResult(
+                    success=False,
+                    message=ratio_failure,
+                    error_code="INSUFFICIENT_REGISTRATION",
+                    registered_images=registered_images,
+                    data={
+                        "eligible_images": eligible_images,
+                        "sparse_path": str(sparse_model.relative_to(job_root)),
+                    },
                 )
 
             check()
             emit("Exporting transforms...")
-            text_model_dir = sparse_model
-            cameras_txt = text_model_dir / "cameras.txt"
-            images_txt = text_model_dir / "images.txt"
-            if not cameras_txt.is_file() or not images_txt.is_file():
-                self._run_colmap(
-                    "model_converter",
-                    [
-                        "--input_path",
-                        str(sparse_model),
-                        "--output_path",
-                        str(text_model_dir),
-                        "--output_type",
-                        "TXT",
-                    ],
-                )
+            cameras_txt, images_txt = self._resolve_model_text_files(
+                sparse_model=sparse_model,
+                text_model_dir=text_model_dir,
+                emit=emit,
+                check=check,
+            )
 
             document = export_transforms_json(
                 cameras_txt=cameras_txt,
                 images_txt=images_txt,
                 output_path=transforms_path,
             )
+
+            if not transforms_path.is_file():
+                return CameraEstimationResult(
+                    success=False,
+                    message="transforms.json was not created.",
+                    error_code="TRANSFORM_EXPORT_FAILED",
+                )
+
+            exported_frames = len(document.get("frames", []))
+            if exported_frames != registered_images:
+                transforms_path.unlink(missing_ok=True)
+                message = (
+                    f"transforms.json has {exported_frames} frame(s) but selected sparse model "
+                    f"{sparse_model.name} has {registered_images} registered image(s)."
+                )
+                emit(message, level="error")
+                return CameraEstimationResult(
+                    success=False,
+                    message=message,
+                    error_code="TRANSFORM_EXPORT_FAILED",
+                )
+
             progress(100)
 
             relative_transforms = camera_transforms_relative_path()
@@ -190,14 +278,17 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                 success=True,
                 message="Camera estimation complete.",
                 transforms_path=relative_transforms,
-                registered_images=len(document.get("frames", [])),
+                registered_images=registered_images,
                 data={
                     "database_path": str(database_path.relative_to(job_root)),
                     "sparse_path": str(sparse_model.relative_to(job_root)),
                     "transforms_path": relative_transforms,
                     "masked_images_dir": MASKED_IMAGES_DIR,
+                    "eligible_images": eligible_images,
                 },
             )
+        except PipelineControlError:
+            raise
         except _ColmapExecutionError as exc:
             emit(str(exc), level="error")
             return CameraEstimationResult(
@@ -214,8 +305,38 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                 error_code="CAMERA_ESTIMATION_FAILED",
             )
 
-    def _count_masked_images(self, job_id: str) -> int:
-        directory = masked_images_path(self._repository.jobs_root, job_id)
+    def build_command(self, command: str, args: list[str]) -> list[str]:
+        """Build the full COLMAP CLI invocation for testing and logging."""
+        return self._build_colmap_command(command, args)
+
+    def _binary_validation_error(self) -> CameraEstimationResult | None:
+        binary = self._resolve_colmap_binary()
+        if binary is not None:
+            return None
+        configured = self._settings.colmap_binary
+        return CameraEstimationResult(
+            success=False,
+            message=(
+                f"COLMAP is unavailable. Install COLMAP or set COLMAP_BINARY "
+                f"to an executable path. Attempted: {configured!r}"
+            ),
+            error_code="COLMAP_UNAVAILABLE",
+        )
+
+    def _resolve_colmap_binary(self) -> Path | None:
+        candidate = Path(self._settings.colmap_binary)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.resolve()
+
+        discovered = shutil.which(self._settings.colmap_binary)
+        if discovered is not None:
+            path = Path(discovered)
+            if path.is_file() and os.access(path, os.X_OK):
+                return path.resolve()
+        return None
+
+    @staticmethod
+    def _count_images(directory: Path) -> int:
         if not directory.is_dir():
             return 0
         return sum(
@@ -224,38 +345,182 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
             if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
         )
 
-    def _run_colmap(self, command: str, args: list[str]) -> None:
-        binary = self._settings.colmap_binary
-        full_command = [binary, command, *args]
-        if self._settings.colmap_use_gpu and command in {"feature_extractor", "exhaustive_matcher"}:
-            if command == "feature_extractor":
-                full_command.extend(["--SiftExtraction.use_gpu", "1"])
-            if command == "exhaustive_matcher":
-                full_command.extend(["--SiftMatching.use_gpu", "1"])
-
-        logger.info("Running COLMAP | command=%s", " ".join(full_command))
-        completed = subprocess.run(
-            full_command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            error_code = _error_code_for_command(command)
-            stderr = completed.stderr.strip() or completed.stdout.strip() or "Unknown COLMAP error"
+    def _build_colmap_command(self, command: str, args: list[str]) -> list[str]:
+        binary = self._resolve_colmap_binary()
+        if binary is None:
             raise _ColmapExecutionError(
-                f"COLMAP {command} failed: {stderr}",
+                f"COLMAP binary is not available: {self._settings.colmap_binary!r}",
+                error_code="COLMAP_UNAVAILABLE",
+            )
+
+        full_command = [str(binary), command, *args]
+        if command in {"feature_extractor", "exhaustive_matcher"}:
+            gpu_flag = "1" if self._settings.colmap_use_gpu else "0"
+            if command == "feature_extractor":
+                full_command.extend(["--FeatureExtraction.use_gpu", gpu_flag])
+            elif command == "exhaustive_matcher":
+                full_command.extend(["--FeatureMatching.use_gpu", gpu_flag])
+        return full_command
+
+    def _run_colmap(
+        self,
+        command: str,
+        args: list[str],
+        *,
+        emit: Callable[[str, str], None],
+        check: ControlCallback,
+    ) -> list[str]:
+        full_command = self._build_colmap_command(command, args)
+        logger.info("Running COLMAP | command=%s", " ".join(full_command))
+
+        try:
+            process = subprocess.Popen(
+                full_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except OSError as exc:
+            raise _ColmapExecutionError(
+                f"Failed to start COLMAP {command}: {exc}",
+                error_code=_error_code_for_command(command),
+            ) from exc
+
+        output_lines: list[str] = []
+        return_code = 1
+
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                stripped = line.rstrip("\n")
+                if stripped:
+                    clean = strip_ansi(stripped)
+                    output_lines.append(clean)
+                    emit(clean)
+                check()
+            return_code = process.wait()
+        except PipelineControlError:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise
+        except Exception:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise
+
+        if return_code != 0:
+            error_code = _error_code_for_command(command)
+            tail = strip_ansi(
+                "\n".join(output_lines[-20:]) if output_lines else "Unknown COLMAP error"
+            )
+            raise _ColmapExecutionError(
+                f"COLMAP {command} failed (exit {return_code}): {tail}",
                 error_code=error_code,
             )
 
-    @staticmethod
-    def _resolve_sparse_model(sparse_dir: Path) -> Path | None:
+        return output_lines
+
+    def _find_best_sparse_model(
+        self,
+        *,
+        sparse_dir: Path,
+        text_model_dir: Path,
+        emit: Callable[[str, str], None],
+        check: ControlCallback,
+    ) -> tuple[Path | None, int]:
+        """Select the sparse model with the most registered images."""
         if not sparse_dir.is_dir():
-            return None
+            return None, 0
+
         candidates = sorted(path for path in sparse_dir.iterdir() if path.is_dir())
-        if not candidates:
-            return None
-        return candidates[0]
+        best_model: Path | None = None
+        best_count = 0
+
+        for candidate in candidates:
+            if not sparse_model_has_files(candidate):
+                emit(f"Skipping sparse model {candidate.name}: no COLMAP model files.", level="warn")
+                continue
+
+            try:
+                images_txt, _ = self._ensure_model_text_files(
+                    sparse_model=candidate,
+                    text_output_dir=text_model_dir / f"eval_{candidate.name}",
+                    emit=emit,
+                    check=check,
+                )
+            except _ColmapExecutionError as exc:
+                emit(f"Skipping sparse model {candidate.name}: {exc}", level="warn")
+                continue
+            count = registered_image_count(images_txt)
+            emit(f"Sparse model {candidate.name}: {count} registered image(s).")
+            if not sparse_model_is_usable(candidate, registered_images=count):
+                continue
+            if count > best_count:
+                best_count = count
+                best_model = candidate
+
+        return best_model, best_count
+
+    def _resolve_model_text_files(
+        self,
+        *,
+        sparse_model: Path,
+        text_model_dir: Path,
+        emit: Callable[[str, str], None],
+        check: ControlCallback,
+    ) -> tuple[Path, Path]:
+        images_txt, cameras_txt = self._ensure_model_text_files(
+            sparse_model=sparse_model,
+            text_output_dir=text_model_dir,
+            emit=emit,
+            check=check,
+        )
+        return cameras_txt, images_txt
+
+    def _ensure_model_text_files(
+        self,
+        *,
+        sparse_model: Path,
+        text_output_dir: Path,
+        emit: Callable[[str, str], None],
+        check: ControlCallback,
+    ) -> tuple[Path, Path]:
+        cameras_txt = sparse_model / "cameras.txt"
+        images_txt = sparse_model / "images.txt"
+        if cameras_txt.is_file() and images_txt.is_file():
+            return images_txt, cameras_txt
+
+        if text_output_dir.exists():
+            shutil.rmtree(text_output_dir)
+        text_output_dir.mkdir(parents=True, exist_ok=True)
+        self._run_colmap(
+            "model_converter",
+            [
+                "--input_path",
+                str(sparse_model),
+                "--output_path",
+                str(text_output_dir),
+                "--output_type",
+                "TXT",
+            ],
+            emit=emit,
+            check=check,
+        )
+
+        cameras_txt = text_output_dir / "cameras.txt"
+        images_txt = text_output_dir / "images.txt"
+        if not cameras_txt.is_file() or not images_txt.is_file():
+            raise _ColmapExecutionError(
+                "COLMAP model_converter did not produce cameras.txt and images.txt.",
+                error_code="TRANSFORM_EXPORT_FAILED",
+            )
+        return images_txt, cameras_txt
 
 
 class _ColmapExecutionError(RuntimeError):

@@ -1,7 +1,9 @@
 """Filesystem-backed persistence for reconstruction jobs."""
 
 import json
+import os
 import re
+import threading
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
@@ -19,7 +21,7 @@ from app.models.job import Job
 logger = get_logger(__name__)
 
 JOB_ID_PATTERN = re.compile(r"^job_(\d{6})$")
-SUPPORTED_ENGINES = frozenset({"Instant-NGP", "Custom NeRF"})
+SUPPORTED_ENGINES = frozenset({"Instant-NGP"})
 
 
 class JobRepository:
@@ -27,6 +29,10 @@ class JobRepository:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
 
     @property
     def jobs_root(self) -> Path:
@@ -72,10 +78,12 @@ class JobRepository:
         """Persist job metadata to ``metadata.json``."""
         root = job_root_path(self.ensure_jobs_root(), job.id)
         metadata_path = root / JOB_METADATA_FILE
-        metadata_path.write_text(
-            json.dumps(job.to_dict(), indent=2),
-            encoding="utf-8",
+        # Write-then-rename so API polling never reads a partially written file.
+        temp_path = metadata_path.with_name(
+            f".{metadata_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
         )
+        temp_path.write_text(json.dumps(job.to_dict(), indent=2), encoding="utf-8")
+        os.replace(temp_path, metadata_path)
         return job
 
     def get(self, job_id: str) -> Job | None:

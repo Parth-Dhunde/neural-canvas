@@ -9,7 +9,6 @@ JOB_SUBDIRECTORIES: tuple[str, ...] = (
     "masked_images",
     "camera",
     "instant_ngp",
-    "custom_nerf",
     "meshes",
     "exports",
     "logs",
@@ -32,6 +31,14 @@ MESHES_DIR = "meshes"
 MESH_OBJ_FILE = "mesh.obj"
 MESH_PLY_FILE = "mesh.ply"
 MESH_GLB_FILE = "mesh.glb"
+MESH_CLEANUP_DIR = "cleanup"
+MESH_CLEANUP_REPORT_FILE = "cleanup.json"
+EXPORTS_DIR = "exports"
+EXPORT_MANIFEST_FILE = "manifest.json"
+MESH_FORMATS: tuple[str, ...] = ("ply", "obj", "glb")
+
+JOB_LOGS_DIR = "logs"
+PIPELINE_LOG_FILE = "pipeline.jsonl"
 
 JOB_METADATA_FILE = "metadata.json"
 JOB_REPORT_FILE = "report.json"
@@ -145,6 +152,11 @@ def mesh_glb_path(jobs_root: Path, job_id: str) -> Path:
 def mesh_glb_relative_path() -> str:
     """Return the job-relative path to ``meshes/mesh.glb``."""
     return f"{MESHES_DIR}/{MESH_GLB_FILE}"
+
+
+def pipeline_log_path(jobs_root: Path, job_id: str) -> Path:
+    """Return the absolute path to the persistent pipeline log for a job."""
+    return job_root_path(jobs_root, job_id) / JOB_LOGS_DIR / PIPELINE_LOG_FILE
 
 
 def job_subdirectory_paths(jobs_root: Path, job_id: str) -> dict[str, Path]:

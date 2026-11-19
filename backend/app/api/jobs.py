@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.jobs.job_logs import MAX_PAGE_SIZE, get_job_log_store
 from app.jobs.structure import (
     MASKED_IMAGES_DIR,
     SUPPORTED_IMAGE_EXTENSIONS,
@@ -30,8 +31,22 @@ from app.schemas.job import (
     JobResponse,
     UploadResponse,
 )
-from app.schemas.pipeline import PipelineResponse, PipelineStageResponse, PipelineStartResponse
+from app.schemas.pipeline import (
+    JobLogEntryResponse,
+    JobLogsResponse,
+    PipelineExecutionResponse,
+    PipelineResponse,
+    PipelineStageResponse,
+    PipelineStartResponse,
+)
+from app.services.export_service import (
+    MEDIA_TYPES,
+    ExportError,
+    ExportService,
+    get_export_service,
+)
 from app.services.job_manager import JobManagerImpl, get_job_manager
+from app.services.job_summary import summarize_job
 from app.services.upload_service import UploadError, UploadService, get_upload_service
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -39,13 +54,13 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 ImageSource = Literal["original", "masked"]
 
 
-def _to_response(job: Job) -> JobResponse:
+def _to_response(job: Job, manager: JobManagerImpl) -> JobResponse:
+    summary = summarize_job(job, manager.repository)
     return JobResponse(
+        **summary,
         id=job.id,
         name=job.name,
         engine=job.engine,
-        status=job.status,
-        progress=job.progress,
         created_at=job.created_at,
         image_count=job.image_count,
         uploaded_at=job.uploaded_at,
@@ -61,6 +76,8 @@ def _to_response(job: Job) -> JobResponse:
         mesh_formats=job.mesh_formats,
         vertex_count=job.vertex_count,
         triangle_count=job.triangle_count,
+        mesh_cleanup=job.mesh_cleanup,
+        exports=job.exports,
     )
 
 
@@ -74,7 +91,7 @@ async def create_job(
         job = await manager.create_job(name=payload.name, engine=payload.engine)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    return _to_response(job)
+    return _to_response(job, manager)
 
 
 @router.get("", response_model=JobListResponse)
@@ -83,7 +100,7 @@ async def list_jobs(
 ) -> JobListResponse:
     """Return all jobs stored on disk."""
     jobs = await manager.list_jobs()
-    responses = [_to_response(job) for job in jobs]
+    responses = [_to_response(job, manager) for job in jobs]
     return JobListResponse(jobs=responses, total=len(responses))
 
 
@@ -96,7 +113,7 @@ async def get_job(
     job = await manager.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
-    return _to_response(job)
+    return _to_response(job, manager)
 
 
 @router.post("/{job_id}/upload", response_model=UploadResponse)
@@ -177,7 +194,15 @@ def _pipeline_response(
         reconstruction_completed_at=job.reconstruction_completed_at,
     )
     stages = [PipelineStageResponse(**stage) for stage in document["stages"]]
-    return PipelineResponse(stages=stages)
+    execution = document.get("execution") or {}
+    return PipelineResponse(
+        stages=stages,
+        execution=PipelineExecutionResponse(
+            status=str(execution.get("status", "idle")),
+            current_stage_id=execution.get("current_stage_id"),
+            last_error=execution.get("last_error"),
+        ),
+    )
 
 
 def _start_response(job_id: str, result) -> PipelineStartResponse:
@@ -204,6 +229,35 @@ async def get_job_pipeline(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
     return _pipeline_response(manager, job, pipeline_manager)
+
+
+@router.get("/{job_id}/logs", response_model=JobLogsResponse)
+async def get_job_logs(
+    job_id: str,
+    after: int = Query(default=0, ge=0, description="Return entries with seq greater than this."),
+    limit: int = Query(default=500, ge=1, le=MAX_PAGE_SIZE),
+    tail: int | None = Query(
+        default=None, ge=1, le=MAX_PAGE_SIZE, description="Return only the last N entries."
+    ),
+    manager: JobManagerImpl = Depends(get_job_manager),
+) -> JobLogsResponse:
+    """Return pipeline log entries incrementally for polling clients."""
+    job = await manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
+
+    page = get_job_log_store(manager.repository.jobs_root).read(
+        job_id, after=after, limit=limit, tail=tail
+    )
+    return JobLogsResponse(
+        job_id=job_id,
+        entries=[JobLogEntryResponse(**entry.to_dict()) for entry in page.entries],
+        next_after=page.next_after,
+        last_seq=page.last_seq,
+        has_more=page.has_more,
+        truncated=page.truncated,
+        reset=page.reset,
+    )
 
 
 @router.post("/{job_id}/pipeline/start", response_model=PipelineStartResponse)
@@ -251,6 +305,30 @@ async def run_job_pipeline_stage(
     return _start_response(job_id, result)
 
 
+@router.post("/{job_id}/pipeline/stages/{stage_id}/reset", response_model=PipelineResponse)
+async def reset_job_pipeline_stage(
+    job_id: str,
+    stage_id: int,
+    manager: JobManagerImpl = Depends(get_job_manager),
+    pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
+) -> PipelineResponse:
+    """Reset a stage and all later stages to waiting. Does not run anything or delete files."""
+    job = await manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
+
+    try:
+        await pipeline_manager.reset_from_stage(job_id, stage_id)
+    except PipelineNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except PipelineBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return _pipeline_response(manager, job, pipeline_manager)
+
+
 @router.post("/{job_id}/pipeline/pause", response_model=PipelineResponse)
 async def pause_job_pipeline(
     job_id: str,
@@ -282,6 +360,8 @@ async def resume_job_pipeline(
         result = await pipeline_manager.run_pipeline(job_id)
     except PipelineNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PipelineBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     return _start_response(job_id, result)
 
@@ -402,3 +482,40 @@ async def get_job_mesh(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No mesh exists for this job.")
 
     return FileResponse(path=candidate, media_type="model/gltf-binary", filename="mesh.glb")
+
+
+@router.get("/{job_id}/exports")
+async def get_job_exports(
+    job_id: str,
+    exports: ExportService = Depends(get_export_service),
+) -> dict[str, object]:
+    """List cleaned and original mesh downloads, verified against the files on disk.
+
+    ``preferred`` is "cleaned" only when Stage 6 succeeded for the current Stage 5 mesh and its
+    GLB verifies; otherwise the original Stage 5 GLB (or null when there is no mesh).
+    """
+    try:
+        job = exports.require_job(job_id)
+    except ExportError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return exports.manifest(job)
+
+
+@router.get("/{job_id}/exports/{variant}/{fmt}")
+async def download_job_export(
+    job_id: str,
+    variant: Literal["cleaned", "original"],
+    fmt: Literal["glb", "obj", "ply"],
+    exports: ExportService = Depends(get_export_service),
+) -> FileResponse:
+    """Download a verified mesh file. Paths are resolved only inside the job directory."""
+    try:
+        job = exports.require_job(job_id)
+        path = exports.resolve_download(job, variant, fmt)
+    except ExportError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return FileResponse(
+        path=path,
+        media_type=MEDIA_TYPES[fmt],
+        filename=f"{job_id}_{variant}.{fmt}",
+    )

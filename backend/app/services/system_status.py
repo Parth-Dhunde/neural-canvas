@@ -29,9 +29,6 @@ class SystemValidationResult:
                 "ready": self.workspace.found,
             },
             "instant_ngp": self.instant_ngp.to_status_dict(),
-            "custom_nerf": {
-                "installed": False,
-            },
             "backend": {
                 "ready": self.backend_ready,
             },

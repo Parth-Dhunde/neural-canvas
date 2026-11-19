@@ -1,1 +1,1 @@
-"""SQLAlchemy / ORM models (future)."""
+"""Domain models for jobs and pipeline state."""

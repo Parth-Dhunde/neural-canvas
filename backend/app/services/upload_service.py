@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 
 THUMBNAIL_SIZE = (256, 256)
 PREVIEW_SUFFIX = "_preview.jpg"
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_UPLOAD_FILES = 100
+MAX_IMAGE_PIXELS = 40_000_000
 
 
 class UploadError(Exception):
@@ -43,6 +46,11 @@ class UploadService:
         """Validate, store, and register uploaded images for a job."""
         if not files:
             raise UploadError("No files provided")
+        if len(files) > MAX_UPLOAD_FILES:
+            raise UploadError(
+                f"Too many files in one upload (max {MAX_UPLOAD_FILES}). "
+                "Upload in smaller batches."
+            )
 
         job = self._repository.get(job_id)
         if job is None:
@@ -70,6 +78,11 @@ class UploadService:
             content = await upload.read()
             if not content:
                 raise UploadError(f"Empty file rejected: {original_name}")
+            if len(content) > MAX_UPLOAD_BYTES:
+                limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+                raise UploadError(
+                    f"File too large: {original_name} (max {limit_mb} MB per image)"
+                )
 
             safe_name = self._unique_filename(uploads_dir, original_name)
             destination = uploads_dir / safe_name
@@ -134,8 +147,14 @@ class UploadService:
         preview_file = previews_dir / preview_name
 
         with Image.open(source) as image:
+            width, height = image.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise UploadError(
+                    f"Image resolution too large: {source.name} "
+                    f"({width}x{height}). Reduce resolution before uploading."
+                )
             rgb = image.convert("RGB")
-            rgb.thumbnail(THUMBNAIL_SIZE)
+            rgb.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
             rgb.save(preview_file, format="JPEG", quality=85)
 
         return preview_name

@@ -15,8 +15,9 @@ class StageRegistry:
     def _build_default_stages(self) -> list[PipelineStage]:
         from app.pipeline.stages.background_removal_stage import BackgroundRemovalStage
         from app.pipeline.stages.camera_estimation_stage import CameraEstimationStage
+        from app.pipeline.stages.export_stage import ExportStage
+        from app.pipeline.stages.mesh_cleanup_stage import MeshCleanupStage
         from app.pipeline.stages.mesh_generation_stage import MeshGenerationStage
-        from app.pipeline.stages.placeholder_stage import PlaceholderStage
         from app.pipeline.stages.reconstruction_stage import ReconstructionStage
         from app.pipeline.stages.upload_stage import UploadStage
 
@@ -25,17 +26,14 @@ class StageRegistry:
         camera_estimation = CameraEstimationStage()
         reconstruction = ReconstructionStage()
         mesh_generation = MeshGenerationStage()
-        placeholders = [
-            PlaceholderStage(stage_id, stage_name)
-            for stage_id, stage_name in PIPELINE_STAGE_DEFINITIONS[5:]
-        ]
         return [
             upload,
             background_removal,
             camera_estimation,
             reconstruction,
             mesh_generation,
-            *placeholders,
+            MeshCleanupStage(),
+            ExportStage(),
         ]
 
     def all(self) -> list[PipelineStage]:
