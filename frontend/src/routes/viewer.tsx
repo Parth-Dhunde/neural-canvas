@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { PageHeader, Panel, ButtonPro } from "@/components/ui-pro/Panel";
+import { PageHeader, ButtonPro } from "@/components/ui-pro/Panel";
 import { EmptyState } from "@/components/ui-pro/EmptyState";
 import { ThreeViewer } from "@/components/viewer/ThreeViewer";
 import { StatusBadge } from "@/components/ui-pro/StatusBadge";
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/viewer")({
       { title: "Viewer — NeuralCanvas" },
       {
         name: "description",
-        content: "Inspect reconstructed 3D assets with a real-time GPU viewer.",
+        content: "Inspect reconstructed meshes and their source images.",
       },
     ],
   }),

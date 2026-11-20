@@ -1,10 +1,10 @@
 {
   "name": "neuralcanvas",
   "version": "0.1.0",
-  "description": "AI-Powered 3D Reconstruction Platform",
+  "description": "Web frontend for NeuralCanvas: multi-view 3D reconstruction with COLMAP and Instant-NGP",
   "private": true,
   "license": "MIT",
-  "author": "NeuralCanvas Contributors",
+  "author": "Parth Dhunde",
   "repository": {
     "type": "git",
     "url": "https://github.com/Parth-Dhunde/neural-canvas.git"

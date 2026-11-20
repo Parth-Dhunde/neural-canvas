@@ -18,16 +18,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # The bind address and port are set by the `uvicorn --host/--port` flags, not here.
     app_name: str = Field(default="NeuralCanvas", alias="APP_NAME")
-    host: str = Field(default="0.0.0.0", alias="HOST")
-    port: int = Field(default=8000, alias="PORT")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     jobs_root: Path = Field(default=Path("jobs"), alias="JOBS_ROOT")
-    datasets_root: Path = Field(default=Path("datasets"), alias="DATASETS_ROOT")
-    engines_root: Path = Field(default=Path("engines"), alias="ENGINES_ROOT")
-    models_root: Path = Field(default=Path("models"), alias="MODELS_ROOT")
+    # Only read for experiment records (outputs/experiments/*/*/metrics.json) on the dashboard.
     outputs_root: Path = Field(default=Path("outputs"), alias="OUTPUTS_ROOT")
 
     colmap_binary: str = Field(default="colmap", alias="COLMAP_BINARY")
@@ -74,18 +71,6 @@ class Settings(BaseSettings):
     @property
     def jobs_path(self) -> Path:
         return resolve_workspace_path(self.jobs_root)
-
-    @property
-    def datasets_path(self) -> Path:
-        return resolve_workspace_path(self.datasets_root)
-
-    @property
-    def engines_path(self) -> Path:
-        return resolve_workspace_path(self.engines_root)
-
-    @property
-    def models_path(self) -> Path:
-        return resolve_workspace_path(self.models_root)
 
     @property
     def outputs_path(self) -> Path:

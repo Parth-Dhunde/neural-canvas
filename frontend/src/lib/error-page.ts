@@ -19,7 +19,7 @@ export function renderErrorPage(): string {
   <body>
     <div class="card">
       <h1>This page didn't load</h1>
-      <p>Something went wrong on our end. You can try refreshing or head back home.</p>
+      <p>NeuralCanvas couldn't render this page. The error is printed in the terminal running the frontend.</p>
       <div class="actions">
         <button class="primary" onclick="location.reload()">Try again</button>
         <a class="secondary" href="/">Go home</a>

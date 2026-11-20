@@ -399,14 +399,8 @@ class ColmapCameraEstimationEngine(CameraEstimationEngine):
                     emit(clean)
                 check()
             return_code = process.wait()
-        except PipelineControlError:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-            raise
         except Exception:
+            # Includes PipelineControlError (pause/cancel from check()): stop COLMAP, re-raise.
             process.terminate()
             try:
                 process.wait(timeout=10)

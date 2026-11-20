@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader, Panel, ButtonPro } from "@/components/ui-pro/Panel";
 import { HardwarePanel } from "@/components/ui-pro/HardwarePanel";
 import { useHardwareTelemetry } from "@/hooks/useHardwareTelemetry";
-import { APP_NAME, APP_SUBTITLE, SUPPORTED_ENGINES } from "@/lib/constants";
+import { APP_DESCRIPTION, APP_NAME, SUPPORTED_ENGINES } from "@/lib/constants";
 import { useAppStore } from "@/store/useAppStore";
 import { useTheme } from "@/hooks/useTheme";
 import type { ThemePreference } from "@/lib/theme";
@@ -271,10 +271,7 @@ function SettingsPage() {
                   <span className="text-subtle">Backend</span>
                   <span className="text-ivory">FastAPI · {settings.backendUrl}</span>
                 </div>
-                <p className="mt-4 text-[12px] text-muted-foreground">
-                  {APP_NAME} is {APP_SUBTITLE.toLowerCase()}. Ingest, train, mesh, and export in one
-                  workflow.
-                </p>
+                <p className="mt-4 text-[12px] text-muted-foreground">{APP_DESCRIPTION}</p>
               </Panel>
               <Panel title="Hardware">
                 <HardwarePanel />

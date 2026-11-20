@@ -32,7 +32,3 @@ def _discover_workspace_root() -> Path:
 def resolve_workspace_path(relative: str | Path) -> Path:
     """Return an absolute path under the workspace root."""
     return (get_workspace_root() / Path(relative)).resolve()
-
-
-# Backwards-compatible alias used by existing imports.
-WORKSPACE_ROOT: Path = get_workspace_root()

@@ -1,5 +1,4 @@
 import { PIPELINE_STEP_NAMES } from "@/lib/constants";
-import { mapPipelineFromApi, type PipelineApiResponse } from "@/lib/mapPipeline";
 import type { PipelineStep } from "@/types";
 
 export function createInitialPipeline(): PipelineStep[] {
@@ -25,13 +24,6 @@ export function pipelineAfterUpload(): PipelineStep[] {
   return steps;
 }
 
-export function pipelineFromApi(api: PipelineApiResponse): PipelineStep[] {
-  if (!api.stages.length) {
-    return createInitialPipeline();
-  }
-  return mapPipelineFromApi(api);
-}
-
 export function pipelineForJob(imageCount: number): PipelineStep[] {
   return imageCount > 0 ? pipelineAfterUpload() : createInitialPipeline();
 }
@@ -46,13 +38,6 @@ export function cameraEstimationStage(pipeline: PipelineStep[]): PipelineStep | 
 
 export function reconstructionStage(pipeline: PipelineStep[]): PipelineStep | undefined {
   return pipeline.find((step) => step.id === 4);
-}
-
-export function canRunBackgroundRemoval(pipeline: PipelineStep[], imageCount: number): boolean {
-  if (imageCount <= 0) return false;
-  const uploadDone = pipeline[0]?.status === "completed";
-  const removal = backgroundRemovalStage(pipeline);
-  return uploadDone && (removal?.status === "waiting" || removal?.status === "queued");
 }
 
 /** True when the next implemented pipeline stage can be started. */

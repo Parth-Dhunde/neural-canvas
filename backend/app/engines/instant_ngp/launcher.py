@@ -37,7 +37,7 @@ class InstantNGPLauncher:
         return validate_instant_ngp(self._settings)
 
     def build_env(self) -> dict[str, str]:
-        # Inherit current process environment so mise-managed shells work.
+        # Inherit the current environment so version-manager shims (e.g. mise, pyenv) on PATH work.
         env = os.environ.copy()
         build_path = str(self.root / "build")
         existing = env.get("PYTHONPATH", "")
@@ -192,8 +192,8 @@ class InstantNGPLauncher:
     def _resolve_interpreter(self) -> str:
         """Resolve configured interpreter to an explicit path.
 
-        Uses the current process environment (including PATH) to allow mise-managed
-        environments, but never assumes a default like ``python3``.
+        Uses the current process environment (including PATH), so version-manager shims such as
+        mise or pyenv resolve, but never assumes a default like ``python3``.
         """
         candidates = self._interpreter_candidates()
         for interpreter in candidates:

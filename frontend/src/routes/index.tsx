@@ -7,13 +7,12 @@ import { StatusBadge } from "@/components/ui-pro/StatusBadge";
 import { ProgressBar } from "@/components/ui-pro/ProgressBar";
 import { HardwarePanel } from "@/components/ui-pro/HardwarePanel";
 import { EmptyState } from "@/components/ui-pro/EmptyState";
-import { APP_SUBTITLE } from "@/lib/constants";
 import { collectFilesFromDataTransfer } from "@/lib/collectUploadFiles";
 import { openFilePicker } from "@/lib/openFilePicker";
 import {
   createNewJob,
   openExistingJob,
-  runBackgroundRemovalForCurrentJob,
+  startPipelineForCurrentJob,
   uploadImagesForCurrentJob,
 } from "@/lib/jobActions";
 import { useHardwareTelemetry } from "@/hooks/useHardwareTelemetry";
@@ -42,7 +41,7 @@ export const Route = createFileRoute("/")({
       { title: "Dashboard — NeuralCanvas" },
       {
         name: "description",
-        content: `${APP_SUBTITLE}. Ingest images, monitor training pipelines, and inspect hardware.`,
+        content: "Upload photos, run the seven-stage pipeline, and monitor progress and hardware.",
       },
     ],
   }),
@@ -94,16 +93,11 @@ function Dashboard() {
   }
 
   async function handleStartReconstruction() {
-    const debug = import.meta.env.DEV;
-    if (debug) console.log("Start Reconstruction clicked");
-
     if (!currentJob) {
       logTerminal("error", "Create a job before starting reconstruction.");
       toast.error("No active job");
       return;
     }
-
-    if (debug) console.log("Job ID", currentJob.id);
 
     if ((currentJob.imageCount ?? 0) <= 0) {
       logTerminal("error", "Upload at least one image before starting reconstruction.");
@@ -121,16 +115,11 @@ function Dashboard() {
     useAppStore.getState().setPipelineRequestActive(true);
     try {
       const baseUrl = settings.backendUrl;
-      if (debug) console.log("POST /pipeline/start");
 
       // Mark viewer as loading so it can auto-refresh once mesh becomes available.
       setViewer({ displayState: "loading" });
 
       const result = await startPipeline(currentJob.id, baseUrl);
-      if (debug) {
-        console.log("HTTP status", "ok");
-        console.log("Response JSON", result);
-      }
 
       // Live logs are streamed by usePipelineActivity; appending result.logs would duplicate them.
       logTerminal("info", `Pipeline request finished (${result.stopped_reason}).`, currentJob.id);
@@ -435,7 +424,7 @@ function Dashboard() {
                 size="sm"
                 variant="bronze"
                 disabled={!pipelineReady || pipelineRunning || pipelineComplete}
-                onClick={() => void runBackgroundRemovalForCurrentJob()}
+                onClick={() => void startPipelineForCurrentJob()}
                 title="Runs every remaining stage in order"
               >
                 {pipelineComplete

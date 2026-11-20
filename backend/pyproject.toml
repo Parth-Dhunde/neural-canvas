@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neuralcanvas-backend"
 version = "0.1.0"
-description = "FastAPI backend for NeuralCanvas — AI-Powered 3D Reconstruction Platform"
+description = "FastAPI backend for NeuralCanvas: multi-view 3D reconstruction with COLMAP and Instant-NGP"
 readme = "README.md"
 # 3.10 matches the Python that Instant-NGP's pyngp bindings are built for.
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "NeuralCanvas Contributors" }]
+authors = [{ name = "Parth Dhunde" }]
 keywords = ["nerf", "3d-reconstruction", "instant-ngp", "fastapi", "colmap"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,7 +31,6 @@ dependencies = [
     "rembg[cpu]",
     "trimesh",
     "fast-simplification>=0.2.0",
-    "pygltflib",
     "commentjson",
 ]
 

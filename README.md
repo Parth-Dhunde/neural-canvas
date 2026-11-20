@@ -1,6 +1,6 @@
 # NeuralCanvas
 
-**Turn a set of photographs of an object into a textured 3D mesh, entirely on your own machine.**
+**Turn a set of photographs of an object into a coloured 3D mesh, entirely on your own machine.**
 
 NeuralCanvas is a full-stack web application around a multi-view 3D reconstruction pipeline. You upload photographs of an object, and it removes the backgrounds, estimates camera poses with [COLMAP](https://colmap.github.io/), trains a neural radiance field with NVIDIA [Instant-NGP](https://github.com/NVlabs/instant-ngp), extracts and cleans a mesh, and exports it as GLB, OBJ and PLY. A browser workspace shows every stage, the live logs, hardware telemetry and a 3D preview of the result.
 
@@ -44,10 +44,10 @@ NeuralCanvas is a full-stack web application around a multi-view 3D reconstructi
 - **Verified exports.** Original and cleaned meshes in GLB, OBJ and PLY, each checked on disk before it is offered.
 - **3D viewer.** A Three.js preview with wireframe and stats, plus the original and masked source images.
 - **Live monitoring.** Per-stage progress, an incremental log terminal, and GPU/CPU/RAM/VRAM telemetry from `nvidia-smi`.
-- **Honest statistics.** Job status, final loss, throughput (steps/s), checkpoints, peak VRAM, training time and total pipeline time come from recorded job data. A value that was never captured for an older run reads **Not recorded**; one that the pipeline does not measure at all (PSNR) reads **Not evaluated**. Neither is ever shown as a number.
+- **Recorded statistics only.** Job status, final loss, throughput (steps/s), checkpoints, peak VRAM, training time and total pipeline time come from recorded job data. A value that was never captured for an older run reads **Not recorded**; one that the pipeline does not measure at all (PSNR) reads **Not evaluated**. Neither is ever shown as a number.
 - **Built-in user guide** at `/guide`: capture tips, the seven stages, reading the statistics, exporting, and troubleshooting.
 - **Resumable pipeline.** Run the whole pipeline, run or retry a single stage, or reset from a stage, without repeating earlier work.
-- **Dark (Graphite) and light (Sand) themes**: layered graphite with copper and champagne gradients, and sand, taupe and champagne with a lavender haze, built on one shared set of design tokens. Cyan/soft blue marks selected and focused elements. The log terminal stays a dark console in both themes.
+- **Dark (Graphite) and light (Sand) themes**: blue-tinted graphite with copper and champagne accents, and sand, taupe and champagne with a lavender haze, built on one shared set of design tokens. Cyan/soft blue marks selected and focused elements. The log terminal stays a dark console in both themes.
 - **Adjustable sidebar**: drag its edge (or use the arrow keys on the handle) to resize it, collapse it to an icon rail, double-click the handle to reset. Width and collapsed state are remembered in the browser. On phones it is a menu drawer instead.
 
 ## How the pipeline works
@@ -132,32 +132,35 @@ On the 4 GB card, 35,000 training steps took about 21 minutes. Larger datasets, 
 
 ## Installation
 
-NeuralCanvas expects a **workspace** directory that contains this repository as `website/`, next to the engine builds:
+**What this repository contains.** This repository holds the NeuralCanvas application source: the FastAPI backend (`backend/`) and the web frontend (`frontend/`). It does **not** include COLMAP, Instant-NGP, model weights, datasets or job data. The two reconstruction engines are external prerequisites: install them yourself (step 2) and point the backend at them in `backend/.env` (see [Configuration](#configuration)).
+
+**Two kinds of paths.** Paths such as `backend/.env` or `frontend/src/` are relative to the cloned repository. Relative paths *inside* `backend/.env` (for example `JOBS_ROOT=jobs`) are instead resolved against the **workspace root**, which is outside the repository:
+
+- by default, the directory that contains the cloned repository;
+- if a directory further up contains both `engines/instant-ngp/` and `website/backend/`, that directory (`app/core/paths.py`).
+
+Absolute paths in `.env` are used as given. The commands below assume this layout, where only `website/` comes from GitHub:
 
 ```
-workspace/
-├── website/            ← this repository
-├── engines/
-│   ├── instant-ngp/    ← Instant-NGP checkout and build
-│   └── colmap/         ← optional local COLMAP build
-└── jobs/               ← created at runtime
+<workspace>/              ← any directory you choose (not part of the repository)
+├── website/              ← this repository, cloned as "website"
+├── engines/instant-ngp/  ← optional: your own Instant-NGP build (matches the default INSTANT_NGP_ROOT)
+└── jobs/                 ← created by the backend at runtime
 ```
-
-The backend finds the workspace root automatically (`app/core/paths.py`): it walks upward until it finds both `engines/instant-ngp` and `website/backend`. Relative paths in `.env` resolve against that root.
 
 ### 1. Clone
 
 ```bash
-mkdir -p workspace/engines && cd workspace
+mkdir neuralcanvas && cd neuralcanvas      # your workspace root
 git clone https://github.com/Parth-Dhunde/neural-canvas.git website
 ```
 
-### 2. Build the engines
+### 2. Install the reconstruction engines (not included)
 
-Follow each project's own instructions. NeuralCanvas only needs the results:
+Follow each project's own instructions. NeuralCanvas only calls the results:
 
-- **Instant-NGP**: clone into `workspace/engines/instant-ngp` and build it *with Python bindings* ([build instructions](https://github.com/NVlabs/instant-ngp#building-instant-ngp-windows--linux)). You need `engines/instant-ngp/build/pyngp.cpython-310-*.so` (or the equivalent for your Python version) and `engines/instant-ngp/scripts/run.py`.
-- **COLMAP**: install a packaged binary or [build it from source](https://colmap.github.io/install.html). Then either put `colmap` on your `PATH` or set `COLMAP_BINARY` to the executable.
+- **Instant-NGP**: clone and build it *with Python bindings* ([build instructions](https://github.com/NVlabs/instant-ngp#building-instant-ngp-windows--linux)), in any location. The checkout must contain `build/pyngp.cpython-310-*.so` (or the equivalent for your Python version) and `scripts/run.py`. Set `INSTANT_NGP_ROOT` in `backend/.env` to the checkout's absolute path, or place the checkout at `<workspace>/engines/instant-ngp` to use the default.
+- **COLMAP**: install a packaged binary or [build it from source](https://colmap.github.io/install.html). Then either put `colmap` on your `PATH` or set `COLMAP_BINARY` in `backend/.env` to the executable's absolute path.
 
 ### 3. Backend
 
@@ -181,24 +184,25 @@ npm install
 
 ## Configuration
 
-All backend settings are read from `website/backend/.env` (see [`backend/.env.example`](backend/.env.example)). `.env` is ignored by git. The defaults are safe, and the file needs no secrets or API keys.
+All backend settings are read from `backend/.env` in the repository (see [`backend/.env.example`](backend/.env.example)). `.env` is ignored by git. The defaults are safe, and the file needs no secrets or API keys.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind address. Use `127.0.0.1` unless you need LAN access (there is no authentication). |
-| `JOBS_ROOT` | `jobs` | Job workspaces, relative to the workspace root |
+| `JOBS_ROOT` | `jobs` | Job workspaces. Relative to the workspace root (outside the repository), or an absolute path |
 | `COLMAP_BINARY` | `colmap` | COLMAP executable name or absolute path |
 | `COLMAP_USE_GPU` | `false` | Use COLMAP's GPU SIFT/matching if your build supports it |
 | `COLMAP_CAMERA_MODEL` | `OPENCV` | COLMAP camera model |
 | `COLMAP_MIN_REGISTRATION_RATIO` | `0.5` | Fail Stage 3 if fewer than this fraction of masked images register |
-| `INSTANT_NGP_ROOT` | `engines/instant-ngp` | Instant-NGP checkout |
+| `INSTANT_NGP_ROOT` | `engines/instant-ngp` | Your external Instant-NGP checkout (not included in this repository). Relative to the workspace root, or an absolute path |
 | `INSTANT_NGP_PYTHON` | `python3` | Interpreter that can import `pyngp`. **Use an absolute path** (for example `…/website/backend/.venv/bin/python`) so the result doesn't depend on `PATH`. |
 | `INSTANT_NGP_N_STEPS` | `35000` | Training steps |
 | `MESH_RESOLUTION` | `256` | Marching-cubes resolution |
 | `MESH_DENSITY_THRESHOLD` | `2.5` | Marching-cubes density threshold |
 | `MESH_CLEANUP_*` | see `.env.example` | Smoothing, floater removal and decimation parameters |
 
-Frontend (optional, `website/frontend/.env`):
+The bind address and port are not read from `.env`; they come from the `uvicorn --host` and `--port` flags (see [Running NeuralCanvas](#running-neuralcanvas)).
+
+Frontend (optional, `frontend/.env` in the repository):
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -238,6 +242,8 @@ On startup the backend logs whether the workspace, the Instant-NGP build and the
 4. **Monitor progress.** Watch the stage progress bars, the terminal (live, searchable logs), the hardware panel and the top-bar step indicator. A job's status is `waiting`, `running`, `paused`, `cancelled`, `failed` or `completed`, as reported by the backend.
 5. **Inspect the result.** When the run finishes, the **Pipeline Snapshot** shows the final loss, throughput, checkpoints, peak VRAM, training time and total pipeline time. Open **Viewer** to orbit the mesh, toggle wireframe, compare the cleaned and original meshes, and browse the original and masked images.
 6. **Export.** Download GLB, OBJ or PLY from the Viewer's export panel or through the API. **History** lists completed jobs with their exports, and failed jobs with the stage and error that stopped them.
+
+If the workspace contains experiment records (`<workspace>/outputs/experiments/*/*/metrics.json`, located via `OUTPUTS_ROOT`), the dashboard lists them separately as **Experimental · not production**. They are read-only, come from runs outside the normal pipeline, and never enter the production statistics.
 
 To re-run cleanup and export on an existing mesh without retraining:
 
@@ -348,7 +354,7 @@ The tests use temporary job folders and never touch your `jobs/` directory.
 
 ## Limitations
 
-- **Single machine, single user.** There is no authentication, CORS allows any origin, and the default bind is `0.0.0.0`. Run it on a trusted network or bind to `127.0.0.1`.
+- **Single machine, single user.** There is no authentication and CORS allows any origin. The documented command binds to `127.0.0.1`; starting `uvicorn` with `--host 0.0.0.0` exposes the API to your network.
 - **No job queue or cross-job GPU lock.** Runs execute inside the HTTP request that starts them. Starting reconstructions for two jobs at once can exhaust a small GPU.
 - **Pause and Cancel** exist in the API but are not yet wired up in the dashboard.
 - **No quality metrics in production.** PSNR is not evaluated, so the dashboard's *Median PSNR* reads *Not evaluated*. Throughput is reported in steps/s because Instant-NGP's CLI does not log rays/s. Jobs trained before VRAM and stage-time recording existed show *Not recorded* for peak VRAM and pipeline time.
@@ -407,7 +413,7 @@ All screenshots are real captures of a running instance (no mockups).
 
 | History | Mobile |
 |---|---|
-| ![History of completed and failed jobs](docs/screenshots/history-light.png) | ![Mobile layout](docs/screenshots/mobile-dark.png) ![Guide on mobile](docs/screenshots/guide-mobile-light.png) |
+| ![History of completed jobs](docs/screenshots/history-light.png) | ![Mobile layout](docs/screenshots/mobile-dark.png) ![Guide on mobile](docs/screenshots/guide-mobile-light.png) |
 
 The viewer screenshot shows the mesh exactly as the current production pipeline produces it, small fragments included.
 

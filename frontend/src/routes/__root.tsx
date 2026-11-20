@@ -10,7 +10,7 @@ import {
 import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { APP_NAME, APP_SUBTITLE } from "@/lib/constants";
+import { APP_DESCRIPTION, APP_NAME, APP_SUBTITLE } from "@/lib/constants";
 import { DesktopShell } from "@/components/shell/DesktopShell";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import { SIDEBAR_INIT_SCRIPT } from "@/lib/sidebarLayout";
@@ -79,9 +79,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: `${APP_NAME} — ${APP_SUBTITLE}` },
       {
         name: "description",
-        content: `${APP_NAME} is ${APP_SUBTITLE.toLowerCase()}. Ingest, train, mesh, and export in one workflow.`,
+        content: APP_DESCRIPTION,
       },
-      { name: "author", content: APP_NAME },
+      { name: "author", content: "Parth Dhunde" },
       { name: "theme-color", content: "#111419" },
       {
         property: "og:title",
@@ -89,7 +89,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       {
         property: "og:description",
-        content: APP_SUBTITLE,
+        content: APP_DESCRIPTION,
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

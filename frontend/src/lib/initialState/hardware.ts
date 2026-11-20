@@ -1,6 +1,6 @@
 import type { HardwareInfo } from "@/types";
 
-export const PLACEHOLDER_HARDWARE: HardwareInfo = {
+export const INITIAL_HARDWARE: HardwareInfo = {
   status: "N/A",
   gpu: "N/A",
   driver: "N/A",

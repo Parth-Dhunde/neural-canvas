@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { DEFAULT_BACKEND_URL } from "@/lib/constants";
-import { PLACEHOLDER_BACKEND_HEALTH } from "@/lib/mocks/health";
-import { PLACEHOLDER_HARDWARE } from "@/lib/mocks/hardware";
-import { createInitialPipeline, pipelineForJob } from "@/lib/pipeline";
+import { INITIAL_BACKEND_HEALTH } from "@/lib/initialState/health";
+import { INITIAL_HARDWARE } from "@/lib/initialState/hardware";
+import { createInitialPipeline } from "@/lib/pipeline";
 import { logStreamChanged } from "@/lib/terminalLog";
 import type {
   AppSettings,
@@ -99,7 +99,7 @@ const defaultSettings: AppSettings = {
 };
 
 export const useAppStore = create<AppStore>((set) => ({
-  backendHealth: PLACEHOLDER_BACKEND_HEALTH,
+  backendHealth: INITIAL_BACKEND_HEALTH,
   setBackendStatus: (status) => set((s) => ({ backendHealth: { ...s.backendHealth, status } })),
   setBackendHealth: (health) => set((s) => ({ backendHealth: { ...s.backendHealth, ...health } })),
 
@@ -136,7 +136,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setUpload: (upload) => set((s) => ({ upload: { ...s.upload, ...upload } })),
   resetUpload: () => set({ upload: { status: "idle", progress: 0, error: null } }),
 
-  hardware: PLACEHOLDER_HARDWARE,
+  hardware: INITIAL_HARDWARE,
   setHardware: (hardware) => set({ hardware }),
 
   viewer: {

@@ -5,10 +5,8 @@ frontend/dist/
 frontend/dist-ssr/
 frontend/build/
 frontend/.output/
-frontend/.vinxi/
 frontend/.tanstack/
 frontend/.nitro/
-frontend/.wrangler/
 
 # Python
 .venv/
@@ -24,7 +22,6 @@ backend/.ruff_cache/
 .env
 .env.*
 !.env.example
-frontend/.dev.vars
 
 # Runtime data. Anchored with a leading "/": an unanchored "jobs/" also matched the
 # source package backend/app/jobs/ and silently kept new modules out of git.

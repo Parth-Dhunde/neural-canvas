@@ -455,7 +455,7 @@ const STAGE_DETAILS = [
   },
   {
     title: PIPELINE_STEP_NAMES[3],
-    body: "Instant-NGP trains the NeRF on your photos and camera positions (35,000 steps by default, about 20 minutes on an RTX 2050).",
+    body: "Instant-NGP trains the NeRF on your photos and camera positions (35,000 steps by default, about 21 minutes on an RTX 2050).",
   },
   {
     title: PIPELINE_STEP_NAMES[4],

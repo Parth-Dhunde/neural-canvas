@@ -4,7 +4,6 @@ export type ResolvedTheme = "light" | "dark";
 export const THEME_STORAGE_KEY = "nc-theme";
 /** NeuralCanvas has always shipped dark; keep that for users who never picked a theme. */
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = "dark";
-export const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
 
 function isPreference(value: unknown): value is ThemePreference {
   return value === "light" || value === "dark" || value === "system";

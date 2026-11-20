@@ -9,7 +9,7 @@ export const Route = createFileRoute("/compare")({
       { title: "Compare — NeuralCanvas" },
       {
         name: "description",
-        content: "Side-by-side comparison of reconstruction engines and outputs.",
+        content: "Engine comparison (not implemented yet).",
       },
     ],
   }),

@@ -128,13 +128,6 @@ export interface HardwareInfo {
   temperature: string;
 }
 
-export interface EngineInfo {
-  id: EngineId;
-  name: string;
-  version?: string;
-  description?: string;
-}
-
 export type ComponentStatus = "ready" | "missing" | "compiling" | "unavailable" | "disconnected";
 
 export interface EngineStatusInfo {
@@ -166,11 +159,6 @@ export interface BackendHealth {
   apiVersion: string | null;
   endpoints: string[];
   system?: SystemHealthSummary;
-}
-
-export interface APIResponse<T> {
-  data: T;
-  error?: string;
 }
 
 export type ViewerDisplayState = "empty" | "loading" | "loaded" | "error";
@@ -213,10 +201,4 @@ export interface UploadState {
   status: UploadStatus;
   progress: number;
   error: string | null;
-}
-
-export interface CompareSlot {
-  engine: EngineId | null;
-  jobId: string | null;
-  metrics: Record<string, string | number | null>;
 }

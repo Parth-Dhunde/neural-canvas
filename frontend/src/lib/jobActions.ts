@@ -226,11 +226,6 @@ export async function startPipelineForCurrentJob(): Promise<void> {
   }
 }
 
-/** @deprecated Use startPipelineForCurrentJob — kept as alias for existing UI hooks. */
-export async function runBackgroundRemovalForCurrentJob(): Promise<void> {
-  return startPipelineForCurrentJob();
-}
-
 /** Load persisted jobs from GET /api/jobs. */
 export async function syncJobsFromBackend(): Promise<void> {
   const { settings, backendHealth } = useAppStore.getState();

@@ -8,5 +8,4 @@ Pillow
 rembg[cpu]
 trimesh
 fast-simplification>=0.2.0
-pygltflib
 commentjson

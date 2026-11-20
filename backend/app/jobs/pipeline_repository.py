@@ -8,19 +8,8 @@ from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.jobs.structure import JOB_PIPELINE_FILE, job_root_path
-from app.pipeline.constants import (
-    BACKGROUND_REMOVAL_STAGE_ID,
-    PIPELINE_STAGE_NAMES,
-    UPLOAD_STAGE_ID,
-)
+from app.pipeline.constants import UPLOAD_STAGE_ID
 
-# Re-export stage identifiers for backwards compatibility.
-__all__ = [
-    "BACKGROUND_REMOVAL_STAGE_ID",
-    "PIPELINE_STAGE_NAMES",
-    "PipelineRepository",
-    "UPLOAD_STAGE_ID",
-]
 
 class PipelineRepository:
     """Read and write per-job pipeline state to ``pipeline.json``."""

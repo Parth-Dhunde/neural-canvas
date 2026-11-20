@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from typing import Any
 
 from app.core.config import get_settings
 
@@ -27,12 +26,3 @@ def setup_logging() -> None:
 def get_logger(name: str) -> logging.Logger:
     """Return a named logger."""
     return logging.getLogger(name)
-
-
-def log_event(logger: logging.Logger, event: str, **fields: Any) -> None:
-    """Emit a structured log line with optional key/value fields."""
-    if fields:
-        detail = " ".join(f"{key}={value}" for key, value in fields.items())
-        logger.info("%s | %s", event, detail)
-    else:
-        logger.info(event)

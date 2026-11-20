@@ -134,32 +134,6 @@ def meshes_path(jobs_root: Path, job_id: str) -> Path:
     return job_root_path(jobs_root, job_id) / MESHES_DIR
 
 
-def mesh_obj_path(jobs_root: Path, job_id: str) -> Path:
-    """Return the absolute path to ``mesh.obj`` for a job."""
-    return meshes_path(jobs_root, job_id) / MESH_OBJ_FILE
-
-
-def mesh_ply_path(jobs_root: Path, job_id: str) -> Path:
-    """Return the absolute path to ``mesh.ply`` for a job."""
-    return meshes_path(jobs_root, job_id) / MESH_PLY_FILE
-
-
-def mesh_glb_path(jobs_root: Path, job_id: str) -> Path:
-    """Return the absolute path to ``mesh.glb`` for a job."""
-    return meshes_path(jobs_root, job_id) / MESH_GLB_FILE
-
-
-def mesh_glb_relative_path() -> str:
-    """Return the job-relative path to ``meshes/mesh.glb``."""
-    return f"{MESHES_DIR}/{MESH_GLB_FILE}"
-
-
 def pipeline_log_path(jobs_root: Path, job_id: str) -> Path:
     """Return the absolute path to the persistent pipeline log for a job."""
     return job_root_path(jobs_root, job_id) / JOB_LOGS_DIR / PIPELINE_LOG_FILE
-
-
-def job_subdirectory_paths(jobs_root: Path, job_id: str) -> dict[str, Path]:
-    """Return a mapping of subdirectory names to absolute paths for a job."""
-    root = job_root_path(jobs_root, job_id)
-    return {name: root / name for name in JOB_SUBDIRECTORIES}
