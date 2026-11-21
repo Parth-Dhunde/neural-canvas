@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Search, ChevronDown, Activity, Layers3, Menu, X } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Search, Activity, Menu, X } from "lucide-react";
 import { BackendStatusBadge } from "./BackendStatusBadge";
+import { EnginePicker } from "./EnginePicker";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { SUPPORTED_ENGINES } from "@/lib/constants";
 import { useAppStore } from "@/store/useAppStore";
 import { cn } from "@/lib/utils";
 
@@ -13,11 +14,10 @@ export function Topbar({
   navOpen?: boolean;
   onToggleNav?: () => void;
 }) {
-  const selectedEngine = useAppStore((s) => s.selectedEngine);
-  const setSelectedEngine = useAppStore((s) => s.setSelectedEngine);
   const currentJob = useAppStore((s) => s.currentJob);
   const pipeline = useAppStore((s) => s.pipeline);
-  const [engineOpen, setEngineOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const navigate = useNavigate();
 
   const activeStep = pipeline.find((s) => s.status === "running");
   const completedSteps = pipeline.filter((s) => s.status === "completed").length;
@@ -73,42 +73,7 @@ export function Topbar({
         </div>
       </div>
 
-      <div className="relative hidden sm:block">
-        <button
-          onClick={() => setEngineOpen((v) => !v)}
-          aria-haspopup="listbox"
-          aria-expanded={engineOpen}
-          className="flex items-center gap-2 rounded-sm border border-border bg-surface-2 px-2.5 py-1 text-[12px] hover:border-border-strong"
-        >
-          <Layers3 className="h-3.5 w-3.5 text-bronze" strokeWidth={1.6} />
-          <span className="text-ivory">{selectedEngine}</span>
-          <ChevronDown className="h-3 w-3 text-subtle" />
-        </button>
-        {engineOpen && (
-          <div className="absolute left-0 top-9 z-30 w-56 rounded-sm border border-border bg-popover p-1 shadow-2xl">
-            {SUPPORTED_ENGINES.map((e) => (
-              <button
-                key={e}
-                onClick={() => {
-                  setSelectedEngine(e);
-                  setEngineOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-[12px]",
-                  e === selectedEngine
-                    ? "bg-selected/10 text-ivory"
-                    : "text-muted-foreground hover:bg-surface-2",
-                )}
-              >
-                <span>{e}</span>
-                {e === selectedEngine && (
-                  <span className="mono text-[10px] text-bronze">ACTIVE</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <EnginePicker className="hidden sm:block" />
 
       <div className="hidden items-center gap-2 rounded-sm border border-border bg-surface-2 px-2.5 py-1 md:flex">
         <Activity className="h-3.5 w-3.5 text-subtle" strokeWidth={1.6} />
@@ -129,19 +94,27 @@ export function Topbar({
 
       <div className="flex-1" />
 
-      <div className="relative hidden w-72 lg:block">
+      <form
+        role="search"
+        className="relative hidden w-72 lg:block"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const q = query.trim();
+          void navigate({ to: "/jobs", search: q ? { q } : {} });
+        }}
+      >
         <Search
-          className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle"
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle"
           strokeWidth={1.6}
         />
         <input
-          disabled
-          title="Search is not implemented yet"
-          aria-label="Search (not implemented yet)"
-          placeholder="Search — coming soon"
-          className="mono h-8 w-full rounded-sm border border-border bg-surface-2 pl-8 pr-2 text-[12px] text-ivory placeholder:text-subtle focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search jobs (opens the Jobs page)"
+          placeholder="Search jobs… (Enter)"
+          className="mono h-8 w-full rounded-sm border border-border bg-surface-2 pl-8 pr-2 text-[12px] text-ivory placeholder:text-subtle focus:border-ring focus:outline-none"
         />
-      </div>
+      </form>
 
       <BackendStatusBadge />
 

@@ -1,17 +1,24 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
-import { Upload, FileImage, Play, MoreHorizontal, Boxes, BookOpen } from "lucide-react";
+import { Upload, FileImage, Play, ChevronRight, Boxes, BookOpen } from "lucide-react";
 import { PageHeader, Panel, Metric, ButtonPro } from "@/components/ui-pro/Panel";
 import { Pipeline } from "@/components/pipeline/Pipeline";
 import { StatusBadge } from "@/components/ui-pro/StatusBadge";
 import { ProgressBar } from "@/components/ui-pro/ProgressBar";
 import { HardwarePanel } from "@/components/ui-pro/HardwarePanel";
 import { EmptyState } from "@/components/ui-pro/EmptyState";
+import { ConfirmDialog } from "@/components/ui-pro/ConfirmDialog";
+import { LocalBackendNotice } from "@/components/shell/BackendNotices";
+import { EnginePicker } from "@/components/shell/EnginePicker";
 import { collectFilesFromDataTransfer } from "@/lib/collectUploadFiles";
 import { openFilePicker } from "@/lib/openFilePicker";
 import {
+  backendUnavailableReasonFor,
+  cancelCurrentPipeline,
   createNewJob,
+  notifyRunFinished,
   openExistingJob,
+  pauseCurrentPipeline,
   startPipelineForCurrentJob,
   uploadImagesForCurrentJob,
 } from "@/lib/jobActions";
@@ -54,6 +61,11 @@ function Dashboard() {
   const [drag, setDrag] = useState(false);
   const [dropBusy, setDropBusy] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [control, setControl] = useState<"pause" | "cancel" | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const backendStatus = useAppStore((s) => s.backendHealth.status);
+  const execution = useAppStore((s) => s.pipelineExecution);
+  const offlineReason = backendUnavailableReasonFor(backendStatus);
   const jobs = useAppStore((s) => s.jobs);
   const currentJob = useAppStore((s) => s.currentJob);
   const selectedEngine = useAppStore((s) => s.selectedEngine);
@@ -93,6 +105,10 @@ function Dashboard() {
   }
 
   async function handleStartReconstruction() {
+    if (offlineReason) {
+      toast.error("Cannot start reconstruction", { description: offlineReason });
+      return;
+    }
     if (!currentJob) {
       logTerminal("error", "Create a job before starting reconstruction.");
       toast.error("No active job");
@@ -137,15 +153,11 @@ function Dashboard() {
       const nextPipeline = await getPipeline(currentJob.id, baseUrl);
       setPipeline(nextPipeline);
 
-      if (result.stopped_reason === "stage_failed") {
-        toast.error("Pipeline stopped: a stage failed");
-      } else {
-        toast.success("Pipeline run finished");
-      }
+      notifyRunFinished(result.stopped_reason);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       logTerminal("error", `Pipeline failed: ${message}`, currentJob.id);
-      toast.error(message);
+      toast.error("Pipeline request failed", { description: message });
     } finally {
       useAppStore.getState().setPipelineRequestActive(false);
       setStarting(false);
@@ -189,13 +201,11 @@ function Dashboard() {
             >
               <BookOpen className="h-3.5 w-3.5" strokeWidth={1.7} /> How to use
             </Link>
-            <ButtonPro variant="outline" reason="Presets are not implemented yet">
-              Import Preset
-            </ButtonPro>
             <ButtonPro
               variant="warm"
               onClick={() => void handleStartReconstruction()}
               loading={starting}
+              reason={offlineReason}
               disabled={
                 !currentJob || upload.status === "uploading" || pipelineRunning || pipelineComplete
               }
@@ -214,6 +224,8 @@ function Dashboard() {
       />
 
       <div className="grid grid-cols-12 gap-4 p-4 sm:p-6">
+        <LocalBackendNotice className="col-span-12" />
+
         <Panel
           title="Ingest · Multi-view Imagery"
           className="col-span-12 xl:col-span-8"
@@ -294,6 +306,7 @@ function Dashboard() {
               <ButtonPro
                 variant="bronze"
                 size="sm"
+                reason={offlineReason}
                 disabled={!currentJob || upload.status === "uploading" || dropBusy}
                 onClick={() => {
                   if (!openFilePicker(fileInputRef.current)) {
@@ -306,6 +319,7 @@ function Dashboard() {
               <ButtonPro
                 variant="outline"
                 size="sm"
+                reason={offlineReason}
                 disabled={!currentJob || upload.status === "uploading" || dropBusy}
                 onClick={() => {
                   if (!openFilePicker(folderInputRef.current)) {
@@ -315,12 +329,20 @@ function Dashboard() {
               >
                 Browse folder
               </ButtonPro>
-              <ButtonPro variant="outline" size="sm" onClick={() => void createNewJob()}>
+              <EnginePicker />
+              <ButtonPro
+                variant="outline"
+                size="sm"
+                reason={offlineReason}
+                onClick={() => void createNewJob()}
+              >
                 Create New Job
               </ButtonPro>
               {jobs.length > 0 && (
                 <select
-                  className="mono h-8 rounded-sm border border-border bg-surface-2 px-2 text-[11px] text-ivory"
+                  disabled={Boolean(offlineReason)}
+                  aria-label="Continue an existing job"
+                  className="mono h-8 rounded-sm border border-border bg-surface-2 px-2 text-[11px] text-ivory disabled:cursor-not-allowed disabled:opacity-50"
                   defaultValue=""
                   onChange={(e) => {
                     const jobId = e.target.value;
@@ -423,27 +445,39 @@ function Dashboard() {
               <ButtonPro
                 size="sm"
                 variant="bronze"
+                reason={offlineReason}
                 disabled={!pipelineReady || pipelineRunning || pipelineComplete}
                 onClick={() => void startPipelineForCurrentJob()}
                 title="Runs every remaining stage in order"
               >
                 {pipelineComplete
                   ? "Pipeline complete"
-                  : failedStep
-                    ? `Retry from stage ${failedStep.id}`
-                    : "Run remaining stages"}
+                  : execution?.status === "paused"
+                    ? "Resume"
+                    : failedStep
+                      ? `Retry from stage ${failedStep.id}`
+                      : "Run remaining stages"}
               </ButtonPro>
               <ButtonPro
                 size="sm"
                 variant="ghost"
-                reason="Pause exists in the API but is not wired up in the dashboard yet"
+                loading={control === "pause"}
+                reason={offlineReason ?? (pipelineRunning ? null : "Nothing is running")}
+                title="Stops the current stage; Resume runs it again"
+                onClick={async () => {
+                  setControl("pause");
+                  await pauseCurrentPipeline();
+                  setControl(null);
+                }}
               >
                 Pause
               </ButtonPro>
               <ButtonPro
                 size="sm"
                 variant="ghost"
-                reason="Cancel exists in the API but is not wired up in the dashboard yet"
+                loading={control === "cancel"}
+                reason={offlineReason ?? (pipelineRunning ? null : "Nothing is running")}
+                onClick={() => setConfirmCancel(true)}
               >
                 Cancel
               </ButtonPro>
@@ -497,7 +531,11 @@ function Dashboard() {
             <EmptyState
               title="No reconstruction jobs yet."
               action={
-                <ButtonPro variant="bronze" onClick={() => void createNewJob()}>
+                <ButtonPro
+                  variant="bronze"
+                  reason={offlineReason}
+                  onClick={() => void createNewJob()}
+                >
                   Create New Job
                 </ButtonPro>
               }
@@ -554,18 +592,33 @@ function Dashboard() {
                       </span>
                     </div>
                     <span className="mono text-muted-foreground">{j.duration ?? "—"}</span>
-                    <button
-                      aria-label={`Open ${j.id}`}
-                      className="grid h-6 w-6 place-items-center rounded-sm text-subtle hover:bg-surface-3 hover:text-ivory"
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
+                    <ChevronRight aria-hidden className="h-3.5 w-3.5 text-subtle" />
                   </div>
                 ))}
               </div>
             </div>
           )}
         </Panel>
+
+        <ConfirmDialog
+          open={confirmCancel}
+          title={`Cancel the run for ${currentJob?.id ?? "this job"}?`}
+          confirmLabel="Cancel run"
+          busy={control === "cancel"}
+          busyLabel="Cancelling…"
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={async () => {
+            setControl("cancel");
+            await cancelCurrentPipeline();
+            setControl(null);
+            setConfirmCancel(false);
+          }}
+        >
+          <p>
+            The running stage stops and returns to waiting. Completed stages and their outputs are
+            kept, so you can run the remaining stages again later.
+          </p>
+        </ConfirmDialog>
 
         <Panel title="Current Engine" className="col-span-12 lg:col-span-6">
           <div className="flex items-start gap-4">

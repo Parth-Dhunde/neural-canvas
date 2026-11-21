@@ -7,7 +7,7 @@ import {
   type UploadApiResponse,
 } from "@/lib/mapJob";
 import { validateUploadFiles } from "@/lib/uploadLimits";
-import { apiFetch, buildUrl } from "./api";
+import { BACKEND_UNREACHABLE_MESSAGE, apiFetch, buildUrl, reportBackendUnreachable } from "./api";
 import type { EngineId, Job } from "@/types";
 
 export type JobImageSource = "original" | "masked";
@@ -39,6 +39,26 @@ export async function getJob(id: string, baseUrl?: string): Promise<Job | null> 
   } catch {
     return null;
   }
+}
+
+export interface JobDeleteOutcome {
+  job_id: string;
+  status: "deleted" | "not_found" | "refused" | "failed";
+  detail: string | null;
+}
+
+/** POST /api/jobs/bulk-delete — each job is deleted or refused independently. */
+export async function deleteJobs(ids: string[], baseUrl?: string): Promise<JobDeleteOutcome[]> {
+  const data = await apiFetch<{ results: JobDeleteOutcome[]; deleted: number }>(
+    "/api/jobs/bulk-delete",
+    { method: "POST", baseUrl, body: JSON.stringify({ job_ids: ids }) },
+  );
+  return data.results;
+}
+
+/** DELETE /api/jobs/{id} */
+export async function deleteJob(id: string, baseUrl?: string): Promise<void> {
+  await apiFetch<void>(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE", baseUrl });
 }
 
 export function filterUploadableFiles(files: File[]): File[] {
@@ -80,7 +100,10 @@ export async function uploadImages(
       reject(new Error(detail || `Upload failed: ${xhr.status}`));
     };
 
-    xhr.onerror = () => reject(new Error("Upload failed — network error"));
+    xhr.onerror = () => {
+      reportBackendUnreachable();
+      reject(new Error(`Upload failed. ${BACKEND_UNREACHABLE_MESSAGE}`));
+    };
     xhr.send(form);
   });
 }

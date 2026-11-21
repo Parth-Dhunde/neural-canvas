@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_BACKEND_URL } from "@/lib/constants";
 import { INITIAL_BACKEND_HEALTH } from "@/lib/initialState/health";
 import { INITIAL_HARDWARE } from "@/lib/initialState/hardware";
+import { applyDeletedJobs } from "@/lib/jobTable";
 import { createInitialPipeline } from "@/lib/pipeline";
 import { logStreamChanged } from "@/lib/terminalLog";
 import type {
@@ -36,6 +37,8 @@ interface AppStore {
   setJobs: (jobs: Job[]) => void;
   setCurrentJob: (job: Job | null) => void;
   addJob: (job: Job) => void;
+  /** Remove deleted jobs from every view (list, active job, viewer selection). */
+  removeJobs: (ids: string[]) => { currentJobChanged: boolean };
 
   // Pipeline
   pipeline: PipelineStep[];
@@ -84,21 +87,14 @@ function boundLines(lines: LogEntry[]): LogEntry[] {
   return lines.length > MAX_TERMINAL_LINES ? lines.slice(lines.length - MAX_TERMINAL_LINES) : lines;
 }
 
-const defaultSettings: AppSettings = {
+export const DEFAULT_SETTINGS: AppSettings = {
   defaultEngine: "Instant-NGP",
-  meshQuality: 70,
-  backgroundRemoval: true,
-  autoCameraEstimation: true,
-  meshCleanup: true,
-  exportFormat: "GLB",
-  precision: "FP16 mixed",
-  rayBatchSize: 4096,
   terminalOnLaunch: true,
   denseTables: false,
   backendUrl: DEFAULT_BACKEND_URL,
 };
 
-export const useAppStore = create<AppStore>((set) => ({
+export const useAppStore = create<AppStore>((set, get) => ({
   backendHealth: INITIAL_BACKEND_HEALTH,
   setBackendStatus: (status) => set((s) => ({ backendHealth: { ...s.backendHealth, status } })),
   setBackendHealth: (health) => set((s) => ({ backendHealth: { ...s.backendHealth, ...health } })),
@@ -111,6 +107,27 @@ export const useAppStore = create<AppStore>((set) => ({
   setJobs: (jobs) => set({ jobs }),
   setCurrentJob: (job) => set({ currentJob: job }),
   addJob: (job) => set((s) => ({ jobs: [job, ...s.jobs], currentJob: job })),
+  removeJobs: (ids) => {
+    const s = get();
+    const next = applyDeletedJobs(
+      { jobs: s.jobs, currentJob: s.currentJob, viewerJobId: s.viewer.selectedJobId },
+      ids,
+    );
+    const currentJobChanged = next.currentJob?.id !== s.currentJob?.id;
+    set({
+      jobs: next.jobs,
+      currentJob: next.currentJob,
+      viewer: { ...s.viewer, selectedJobId: next.viewerJobId },
+      ...(currentJobChanged
+        ? {
+            pipeline: createInitialPipeline(),
+            pipelineExecution: null,
+            logStream: { status: "no-job", jobId: null, error: null, truncated: false },
+          }
+        : {}),
+    });
+    return { currentJobChanged };
+  },
 
   pipeline: createInitialPipeline(),
   setPipeline: (pipeline) => set({ pipeline }),
@@ -189,7 +206,7 @@ export const useAppStore = create<AppStore>((set) => ({
       logStreamChanged(s.logStream, stream) ? { logStream: { ...s.logStream, ...stream } } : s,
     ),
 
-  settings: defaultSettings,
+  settings: DEFAULT_SETTINGS,
   setSettings: (settings) =>
     set((s) => {
       const next = { ...s.settings, ...settings };

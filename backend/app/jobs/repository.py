@@ -22,6 +22,27 @@ logger = get_logger(__name__)
 
 JOB_ID_PATTERN = re.compile(r"^job_(\d{6})$")
 SUPPORTED_ENGINES = frozenset({"Instant-NGP"})
+# Highest job number ever issued; written only when a job is deleted, so a deleted job's id is
+# never handed to a new job (a repeated DELETE must not remove a different job).
+LAST_JOB_NUMBER_FILE = ".last_job_number"
+
+
+def read_last_job_number(jobs_root: Path) -> int:
+    try:
+        value = int((jobs_root / LAST_JOB_NUMBER_FILE).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+    return value if 0 <= value <= 999_999 else 0
+
+
+def record_job_number(jobs_root: Path, number: int) -> None:
+    """Raise the stored high-water mark to ``number`` (never lowers it). Atomic replace."""
+    if number <= read_last_job_number(jobs_root):
+        return
+    target = jobs_root / LAST_JOB_NUMBER_FILE
+    temp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    temp.write_text(str(number), encoding="utf-8")
+    os.replace(temp, target)
 
 
 class JobRepository:
@@ -47,7 +68,7 @@ class JobRepository:
     def next_job_id(self) -> str:
         """Generate the next sequential job identifier."""
         self.ensure_jobs_root()
-        highest = 0
+        highest = read_last_job_number(self.jobs_root)
         for path in self.jobs_root.iterdir():
             if not path.is_dir():
                 continue

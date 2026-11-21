@@ -1,9 +1,45 @@
+import { toast } from "sonner";
+import { engineOption, isSubmittableEngine } from "@/lib/engines";
+import { mapExecutionFromApi, mapPipelineFromApi } from "@/lib/mapPipeline";
 import { canStartPipeline, findNextRunnableStage, pipelineForJob } from "@/lib/pipeline";
 import { chunkUploadFiles, validateUploadFiles } from "@/lib/uploadLimits";
-import { createJob, getJob, getJobs, uploadImages } from "@/services/jobs";
-import { getPipeline, startPipeline } from "@/services/pipeline";
+import {
+  createJob,
+  deleteJobs,
+  getJob,
+  getJobs,
+  uploadImages,
+  type JobDeleteOutcome,
+} from "@/services/jobs";
+import { cancelPipeline, getPipeline, pausePipeline, startPipeline } from "@/services/pipeline";
 import { useAppStore } from "@/store/useAppStore";
-import type { Job, LogEntry, PipelineStep } from "@/types";
+import type { BackendConnectionStatus, Job, LogEntry, PipelineStep } from "@/types";
+
+/** Why backend-dependent actions are unavailable for `status`, or null if they are available.
+ * Components pass the status from their store hook so server and client render the same. */
+export function backendUnavailableReasonFor(status: BackendConnectionStatus): string | null {
+  if (status === "connected") return null;
+  if (status === "connecting") return "Checking the backend connection — try again in a moment.";
+  return "The local backend is offline, so this action is unavailable.";
+}
+
+/** Same as `backendUnavailableReasonFor`, for the live store state (actions, not rendering). */
+export function backendUnavailableReason(): string | null {
+  return backendUnavailableReasonFor(useAppStore.getState().backendHealth.status);
+}
+
+/** Returns false (and explains why) when the backend cannot be used for `action`. */
+function requireBackend(action: string): boolean {
+  const reason = backendUnavailableReason();
+  if (!reason) return true;
+  toast.error(`Cannot ${action}`, { description: reason });
+  appendLine({ level: "error", msg: `Cannot ${action}: ${reason}` });
+  return false;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
 
 function terminalTime(): string {
   const d = new Date();
@@ -43,37 +79,121 @@ async function refreshCurrentJobPipeline(job: Job) {
 }
 
 /** Create a job via POST /api/jobs and update global state. */
-export async function createNewJob(): Promise<void> {
-  const { settings, backendHealth } = useAppStore.getState();
+export async function createNewJob(): Promise<Job | null> {
+  const { settings, selectedEngine } = useAppStore.getState();
 
-  if (backendHealth.status !== "connected") {
-    appendLine({ level: "error", msg: "Cannot create job — backend disconnected." });
-    return;
+  if (!isSubmittableEngine(selectedEngine)) {
+    const option = engineOption(selectedEngine);
+    toast.error(`${selectedEngine} is not available yet`, { description: option?.description });
+    return null;
   }
+  if (!requireBackend("create a job")) return null;
 
   appendLine({ level: "info", msg: "Creating job..." });
 
   try {
-    const job = await createJob({ engine: "Instant-NGP" }, settings.backendUrl);
+    const job = await createJob({ engine: selectedEngine }, settings.backendUrl);
     useAppStore.getState().addJob(job);
     const pipeline = await loadPipelineForJob(job);
     useAppStore.getState().setPipeline(pipeline);
     appendLine({ level: "ok", msg: "Job created." });
     appendLine({ level: "info", msg: `Job ID: ${job.id}` });
+    toast.success(`Created ${job.id}`);
+    return job;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = errorMessage(error);
     appendLine({ level: "error", msg: `Failed to create job: ${message}` });
+    toast.error("Could not create the job", { description: message });
+    return null;
+  }
+}
+
+export interface DeleteJobsSummary {
+  deleted: string[];
+  problems: JobDeleteOutcome[];
+}
+
+/**
+ * Delete jobs on the backend and remove them from every view. Jobs the backend no longer has
+ * are removed too; refused or failed ones stay and are reported.
+ */
+export async function deleteJobsById(ids: string[]): Promise<DeleteJobsSummary> {
+  if (ids.length === 0) return { deleted: [], problems: [] };
+  const reason = backendUnavailableReason();
+  if (reason) throw new Error(reason);
+  const { settings } = useAppStore.getState();
+  const outcomes = await deleteJobs(ids, settings.backendUrl);
+  const gone = outcomes.filter((o) => o.status === "deleted" || o.status === "not_found");
+  const goneIds = gone.map((o) => o.job_id);
+  const { currentJobChanged } = useAppStore.getState().removeJobs(goneIds);
+  if (currentJobChanged) {
+    useAppStore.getState().removeJobTerminalLines();
+    const next = useAppStore.getState().currentJob;
+    if (next) {
+      const pipeline = await loadPipelineForJob(next);
+      if (useAppStore.getState().currentJob?.id === next.id) {
+        useAppStore.getState().setPipeline(pipeline);
+      }
+    }
+  }
+  goneIds.forEach((id) => appendLine({ level: "ok", msg: `Deleted ${id}.` }));
+  const problems = outcomes.filter((o) => o.status === "refused" || o.status === "failed");
+  problems.forEach((o) =>
+    appendLine({ level: "error", msg: `Not deleted ${o.job_id}: ${o.detail ?? o.status}` }),
+  );
+  void refreshJobList();
+  return { deleted: goneIds, problems };
+}
+
+async function applyControlResponse(
+  jobId: string,
+  response: Awaited<ReturnType<typeof pausePipeline>>,
+) {
+  const state = useAppStore.getState();
+  if (state.currentJob?.id !== jobId) return;
+  state.setPipeline(mapPipelineFromApi(response));
+  state.setPipelineExecution(mapExecutionFromApi(response));
+}
+
+/** Pause the running pipeline; the current stage stops and can be resumed later. */
+export async function pauseCurrentPipeline(): Promise<boolean> {
+  const { currentJob, settings } = useAppStore.getState();
+  if (!currentJob || !requireBackend("pause the pipeline")) return false;
+  try {
+    const response = await pausePipeline(currentJob.id, settings.backendUrl);
+    await applyControlResponse(currentJob.id, response);
+    toast.success("Pause requested", {
+      description: "The current stage stops and will run again when you resume.",
+    });
+    return true;
+  } catch (error) {
+    toast.error("Could not pause", { description: errorMessage(error) });
+    return false;
+  }
+}
+
+/** Cancel the running pipeline; completed stages are kept. */
+export async function cancelCurrentPipeline(): Promise<boolean> {
+  const { currentJob, settings } = useAppStore.getState();
+  if (!currentJob || !requireBackend("cancel the pipeline")) return false;
+  try {
+    const response = await cancelPipeline(currentJob.id, settings.backendUrl);
+    await applyControlResponse(currentJob.id, response);
+    toast.success("Cancellation requested", {
+      description: "The running stage stops; completed stages are kept.",
+    });
+    return true;
+  } catch (error) {
+    toast.error("Could not cancel", { description: errorMessage(error) });
+    return false;
   }
 }
 
 /** Select an existing job as the active workspace job. */
 export async function openExistingJob(jobId: string): Promise<void> {
-  const { settings, backendHealth, jobs } = useAppStore.getState();
+  const { settings, jobs } = useAppStore.getState();
 
-  if (backendHealth.status !== "connected") {
-    appendLine({ level: "error", msg: "Cannot open job — backend disconnected." });
-    return;
-  }
+  if (!requireBackend("open the job")) return;
 
   appendLine({ level: "info", msg: `Opening job ${jobId}...` });
 
@@ -104,11 +224,10 @@ export async function openExistingJob(jobId: string): Promise<void> {
 
 /** Upload images to the active job. */
 export async function uploadImagesForCurrentJob(files: File[]): Promise<void> {
-  const { settings, backendHealth, currentJob, setUpload } = useAppStore.getState();
+  const { settings, currentJob, setUpload } = useAppStore.getState();
 
-  if (backendHealth.status !== "connected") {
-    setUpload({ status: "error", progress: 0, error: "Backend disconnected" });
-    appendLine({ level: "error", msg: "Cannot upload — backend disconnected." });
+  if (!requireBackend("upload images")) {
+    setUpload({ status: "error", progress: 0, error: backendUnavailableReason() });
     return;
   }
 
@@ -175,20 +294,18 @@ export async function uploadImagesForCurrentJob(files: File[]): Promise<void> {
       appendLine({ level: "info", msg: `Saved: ${name}` });
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = errorMessage(error);
     setUpload({ status: "error", progress: 0, error: message });
     appendLine({ level: "error", msg: `Upload failed: ${message}` });
+    toast.error("Upload failed", { description: message });
   }
 }
 
 /** Run the reconstruction pipeline for the active job. */
 export async function startPipelineForCurrentJob(): Promise<void> {
-  const { settings, backendHealth, currentJob, pipeline } = useAppStore.getState();
+  const { settings, currentJob, pipeline } = useAppStore.getState();
 
-  if (backendHealth.status !== "connected") {
-    appendLine({ level: "error", msg: "Cannot start pipeline — backend disconnected." });
-    return;
-  }
+  if (!requireBackend("start the pipeline")) return;
 
   if (!currentJob) {
     appendLine({ level: "error", msg: "Create a job before starting the pipeline." });
@@ -216,11 +333,14 @@ export async function startPipelineForCurrentJob(): Promise<void> {
       msg: `Pipeline request finished (${result.stopped_reason}).`,
       jobId: currentJob.id,
     });
+    notifyRunFinished(result.stopped_reason);
     await refreshCurrentJobPipeline(currentJob);
+    void refreshJobList();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = errorMessage(error);
     appendLine({ level: "error", msg: `Pipeline failed: ${message}`, jobId: currentJob.id });
-    await refreshCurrentJobPipeline(currentJob);
+    toast.error("Pipeline request failed", { description: message });
+    await refreshCurrentJobPipeline(currentJob).catch(() => undefined);
   } finally {
     useAppStore.getState().setPipelineRequestActive(false);
   }
@@ -269,4 +389,19 @@ export async function refreshJobList(): Promise<void> {
   } catch {
     // Keep the existing list; the next refresh retries.
   }
+}
+
+/** Toast describing why a pipeline run request returned. */
+export function notifyRunFinished(stoppedReason: string): void {
+  const messages: Record<string, [boolean, string]> = {
+    completed: [true, "Pipeline run finished"],
+    paused: [true, "Pipeline paused"],
+    cancelled: [true, "Pipeline cancelled"],
+    stage_failed: [false, "Pipeline stopped: a stage failed"],
+    stage_not_runnable: [false, "Pipeline could not continue: a stage is not runnable"],
+    no_pending_stage: [true, "Nothing left to run"],
+  };
+  const [ok, text] = messages[stoppedReason] ?? [true, `Pipeline stopped (${stoppedReason})`];
+  if (ok) toast.success(text);
+  else toast.error(text, { description: "See the terminal for the stage log." });
 }

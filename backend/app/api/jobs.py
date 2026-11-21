@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.jobs.deletion import JobDeletionError
 from app.jobs.job_logs import MAX_PAGE_SIZE, get_job_log_store
 from app.jobs.structure import (
     MASKED_IMAGES_DIR,
@@ -22,11 +23,15 @@ from app.pipeline.pipeline_manager import (
     PipelineBusyError,
     PipelineManager,
     PipelineNotFoundError,
+    PipelineNotRunningError,
     get_pipeline_manager,
 )
 from app.schemas.job import (
     BackgroundRemovalResponse,
+    JobBulkDeleteRequest,
+    JobBulkDeleteResponse,
     JobCreateRequest,
+    JobDeleteOutcome,
     JobListResponse,
     JobResponse,
     UploadResponse,
@@ -45,6 +50,7 @@ from app.services.export_service import (
     ExportService,
     get_export_service,
 )
+from app.services.job_deletion import JobDeletionService, get_job_deletion_service
 from app.services.job_manager import JobManagerImpl, get_job_manager
 from app.services.job_summary import summarize_job
 from app.services.upload_service import UploadError, UploadService, get_upload_service
@@ -92,6 +98,42 @@ async def create_job(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return _to_response(job, manager)
+
+
+_DELETION_STATUS = {
+    "invalid": status.HTTP_400_BAD_REQUEST,
+    "not_found": status.HTTP_404_NOT_FOUND,
+    "running": status.HTTP_409_CONFLICT,
+    "protected": status.HTTP_409_CONFLICT,
+    "unsafe": status.HTTP_409_CONFLICT,
+    "failed": status.HTTP_500_INTERNAL_SERVER_ERROR,
+}
+
+
+@router.post("/bulk-delete", response_model=JobBulkDeleteResponse)
+async def bulk_delete_jobs(
+    payload: JobBulkDeleteRequest,
+    deletion: JobDeletionService = Depends(get_job_deletion_service),
+) -> JobBulkDeleteResponse:
+    """Delete several jobs. Each job is handled independently; see ``results`` per job."""
+    outcomes = await deletion.delete_many(payload.job_ids)
+    return JobBulkDeleteResponse(
+        results=[JobDeleteOutcome(**outcome.to_dict()) for outcome in outcomes],
+        deleted=sum(1 for outcome in outcomes if outcome.status == "deleted"),
+    )
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: str,
+    deletion: JobDeletionService = Depends(get_job_deletion_service),
+) -> Response:
+    """Delete a job and its workspace. Running and protected jobs are refused (409)."""
+    try:
+        await deletion.delete(job_id)
+    except JobDeletionError as exc:
+        raise HTTPException(status_code=_DELETION_STATUS[exc.code], detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("", response_model=JobListResponse)
@@ -340,7 +382,10 @@ async def pause_job_pipeline(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
 
-    pipeline_manager.pause(job_id)
+    try:
+        pipeline_manager.pause(job_id)
+    except PipelineNotRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _pipeline_response(manager, job, pipeline_manager)
 
 
@@ -377,7 +422,10 @@ async def cancel_job_pipeline(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {job_id}")
 
-    pipeline_manager.cancel(job_id)
+    try:
+        pipeline_manager.cancel(job_id)
+    except PipelineNotRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _pipeline_response(manager, job, pipeline_manager)
 
 

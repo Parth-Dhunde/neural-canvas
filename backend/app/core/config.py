@@ -68,6 +68,13 @@ class Settings(BaseSettings):
         default=250_000, ge=1_000, alias="MESH_CLEANUP_DECIMATE_MAX_FACES"
     )
 
+    # Comma-separated job ids that the API refuses to delete (e.g. a reference job).
+    protected_job_ids: str = Field(default="", alias="PROTECTED_JOB_IDS")
+
+    @property
+    def protected_job_id_set(self) -> frozenset[str]:
+        return frozenset(part.strip() for part in self.protected_job_ids.split(",") if part.strip())
+
     @property
     def jobs_path(self) -> Path:
         return resolve_workspace_path(self.jobs_root)

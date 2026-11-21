@@ -104,3 +104,22 @@ class BackgroundRemovalResponse(BaseModel):
     failed: int
     total: int
     logs: list[str]
+
+
+class JobBulkDeleteRequest(BaseModel):
+    """Request body for ``POST /api/jobs/bulk-delete``."""
+
+    job_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class JobDeleteOutcome(BaseModel):
+    job_id: str
+    status: str = Field(description="deleted, not_found, refused or failed")
+    detail: str | None = None
+
+
+class JobBulkDeleteResponse(BaseModel):
+    """Response body for ``POST /api/jobs/bulk-delete``."""
+
+    results: list[JobDeleteOutcome]
+    deleted: int

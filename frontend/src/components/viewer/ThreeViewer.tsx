@@ -223,7 +223,12 @@ export function ThreeViewer({
         {meshUrl && (
           <Canvas
             camera={{ position: [3.6, 2.4, 3.6], fov: 35, near: 0.05, far: 200 }}
-            gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+            // preserveDrawingBuffer lets the Viewer page save a PNG snapshot of the canvas.
+            gl={{
+              antialias: true,
+              toneMapping: THREE.ACESFilmicToneMapping,
+              preserveDrawingBuffer: true,
+            }}
             dpr={[1, 2]}
             data-testid="mesh-canvas"
           >

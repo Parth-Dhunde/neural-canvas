@@ -152,6 +152,11 @@ class JobLogStore:
             reset=reset,
         )
 
+    def forget(self, job_id: str) -> None:
+        """Drop the in-memory buffer of a deleted job (its log file went with the job)."""
+        with self._lock:
+            self._buffers.pop(job_id, None)
+
     def last_seq(self, job_id: str) -> int:
         with self._lock:
             return self._buffer(job_id).last_seq

@@ -298,10 +298,12 @@ class PipelineState:
                     stage["completed_at"] = None
                 break
 
+        was_running = execution["status"] == "running"
         execution["status"] = "idle"
         execution["current_stage_id"] = None
         execution["paused_at"] = None
-        execution["last_error"] = "Recovered after restart"
+        # A paused run was stopped on purpose; only an interrupted run records an error.
+        execution["last_error"] = "Recovered after restart" if was_running else None
         return self.save(job_id, document)
 
     @staticmethod

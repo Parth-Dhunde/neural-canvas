@@ -65,7 +65,9 @@ class JobManagerImpl(JobManager):
         return saved
 
     async def delete_job(self, job_id: str) -> None:
-        raise NotImplementedError("Job deletion is not implemented yet")
+        from app.services.job_deletion import JobDeletionService
+
+        await JobDeletionService(self._repository).delete(job_id)
 
     async def get_job(self, job_id: str) -> Job | None:
         return self._repository.get(job_id)

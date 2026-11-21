@@ -182,15 +182,11 @@ export interface TerminalState {
 }
 
 export interface AppSettings {
+  /** Engine new jobs are created with; only available engines are allowed. */
   defaultEngine: EngineId;
-  meshQuality: number;
-  backgroundRemoval: boolean;
-  autoCameraEstimation: boolean;
-  meshCleanup: boolean;
-  exportFormat: string;
-  precision: string;
-  rayBatchSize: number;
+  /** Open the integrated terminal when the app loads. */
   terminalOnLaunch: boolean;
+  /** Compact row height on the Jobs table. */
   denseTables: boolean;
   backendUrl: string;
 }

@@ -33,6 +33,10 @@ class PipelineBusyError(Exception):
     """Raised when a job pipeline is already running."""
 
 
+class PipelineNotRunningError(Exception):
+    """Raised when pause or cancel is requested but no run is in progress."""
+
+
 @dataclass
 class _JobRunControl:
     paused: bool = False
@@ -69,8 +73,10 @@ class PipelineRunResult:
 class PipelineManager:
     """Owns pipeline execution, logging, and persistence."""
 
-    # Shared across instances: the API builds a new manager per request.
+    # Shared across instances: the API builds a new manager per request, so a pause or cancel
+    # request must reach the control flags of the instance that is executing the run.
     _locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _controls: ClassVar[dict[str, _JobRunControl]] = {}
 
     def __init__(
         self,
@@ -83,7 +89,6 @@ class PipelineManager:
         self._state = state or PipelineState()
         self._repository = repository or JobRepository()
         self._log_store = log_store or get_job_log_store(self._repository.jobs_root)
-        self._controls: dict[str, _JobRunControl] = {}
         self._run_start_seq: dict[str, int] = {}
 
     def initialize(self, job_id: str) -> dict[str, Any]:
@@ -242,7 +247,9 @@ class PipelineManager:
         return result
 
     def pause(self, job_id: str) -> dict[str, Any]:
-        """Pause an in-flight pipeline."""
+        """Pause an in-flight pipeline; the current stage stops and returns to waiting."""
+        if not self.is_running(job_id):
+            raise PipelineNotRunningError(f"No run is in progress for {job_id}.")
         control = self._controls.setdefault(job_id, _JobRunControl())
         control.paused = True
         document = self._state.set_execution(
@@ -262,7 +269,9 @@ class PipelineManager:
         return document
 
     def cancel(self, job_id: str) -> dict[str, Any]:
-        """Cancel an in-flight pipeline."""
+        """Cancel an in-flight pipeline; the current stage stops and returns to waiting."""
+        if not self.is_running(job_id):
+            raise PipelineNotRunningError(f"No run is in progress for {job_id}.")
         control = self._controls.setdefault(job_id, _JobRunControl())
         control.cancelled = True
         control.paused = False
@@ -304,10 +313,23 @@ class PipelineManager:
             raise PipelineNotFoundError(f"Job not found: {job_id}")
         return job
 
+    @classmethod
+    def job_lock(cls, job_id: str) -> asyncio.Lock:
+        """The per-job lock held while a run, reset or deletion is in progress."""
+        if job_id not in cls._locks:
+            cls._locks[job_id] = asyncio.Lock()
+        return cls._locks[job_id]
+
     def _job_lock(self, job_id: str) -> asyncio.Lock:
-        if job_id not in self._locks:
-            self._locks[job_id] = asyncio.Lock()
-        return self._locks[job_id]
+        return self.job_lock(job_id)
+
+    @classmethod
+    def forget(cls, job_id: str) -> None:
+        """Drop per-job state for a deleted job (only when nothing holds its lock)."""
+        lock = cls._locks.get(job_id)
+        if lock is not None and not lock.locked():
+            cls._locks.pop(job_id, None)
+        cls._controls.pop(job_id, None)
 
     def _acquire_job_lock(self, job_id: str) -> asyncio.Lock:
         """Return the job lock for ``async with``, rejecting concurrent runs and resets."""
@@ -416,7 +438,15 @@ class PipelineManager:
 
         try:
             stage_result = await stage.run(job, ctx)
-        except PipelineControlError:
+        except PipelineControlError as exc:
+            # The interrupted stage did not finish: return it to waiting so it can run again.
+            self._state.mark_stage_waiting(job.id, stage.stage_id)
+            self.log(
+                job.id,
+                f"Stage {stage.stage_id} ({stage.name()}) stopped: run {exc}.",
+                level="warn",
+                stage_id=stage.stage_id,
+            )
             raise
         except Exception as exc:
             self._state.mark_stage_failed(job.id, stage.stage_id, message=str(exc))

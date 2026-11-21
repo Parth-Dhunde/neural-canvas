@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
 export function Panel({
   title,
@@ -87,24 +87,31 @@ export function Metric({
   );
 }
 
-export function ButtonPro({
-  children,
-  variant = "default",
-  size = "md",
-  loading = false,
-  reason,
-  className,
-  disabled,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  /** "bronze" is the accent variant (blue); "warm" is reserved for the primary call to action. */
-  variant?: "default" | "bronze" | "warm" | "ghost" | "outline";
+type ButtonProProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** "bronze" is the accent variant (blue); "warm" is reserved for the primary call to action;
+   * "danger" is for destructive actions. */
+  variant?: "default" | "bronze" | "warm" | "ghost" | "outline" | "danger";
   size?: "sm" | "md";
   /** Shows a spinner, disables the button and sets aria-busy. */
   loading?: boolean;
   /** Why the button is unavailable; disables it and shows the reason on hover. */
-  reason?: string;
-}) {
+  reason?: string | null;
+};
+
+export const ButtonPro = forwardRef<HTMLButtonElement, ButtonProProps>(function ButtonPro(
+  {
+    children,
+    variant = "default",
+    size = "md",
+    loading = false,
+    reason,
+    className,
+    disabled,
+    type = "button",
+    ...props
+  },
+  ref,
+) {
   const variants = {
     default:
       "bg-surface-2 border border-border text-ivory hover:border-border-strong hover:bg-surface-3 active:bg-surface-3",
@@ -114,11 +121,15 @@ export function ButtonPro({
     ghost: "text-muted-foreground hover:bg-surface-2 hover:text-ivory active:bg-surface-3",
     outline:
       "border border-border-strong text-ivory hover:bg-surface-2 hover:border-selected/45 active:bg-surface-3",
+    danger:
+      "bg-destructive/12 border border-destructive/55 text-destructive hover:bg-destructive/20 hover:border-destructive/75 active:bg-destructive/25",
   };
   const sizes = { sm: "h-7 px-2.5 text-[11px]", md: "h-8 px-3 text-[12px]" };
   const button = (
     <button
       {...props}
+      ref={ref}
+      type={type}
       disabled={disabled || loading || Boolean(reason)}
       aria-busy={loading || undefined}
       className={cn(
@@ -149,4 +160,4 @@ export function ButtonPro({
       <span className="sr-only">({reason})</span>
     </span>
   );
-}
+});

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageHeader, ButtonPro } from "@/components/ui-pro/Panel";
+import { downloadBlob } from "@/lib/download";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/ui-pro/EmptyState";
 import { ThreeViewer } from "@/components/viewer/ThreeViewer";
 import { StatusBadge } from "@/components/ui-pro/StatusBadge";
@@ -87,7 +89,13 @@ function ViewerPage() {
         description="Inspect reconstructed meshes and the source imagery behind them."
         actions={
           <>
-            <ButtonPro variant="outline" reason="Viewport snapshots are not implemented yet">
+            <ButtonPro
+              variant="outline"
+              reason={
+                tab === "model" && hasMesh ? undefined : "Open a job's 3D model to take a snapshot"
+              }
+              onClick={() => saveSnapshot(selectedJob?.id ?? "model")}
+            >
               Snapshot
             </ButtonPro>
             {links.glb ? (
@@ -99,7 +107,7 @@ function ViewerPage() {
                 Export mesh
               </a>
             ) : (
-              <ButtonPro variant="bronze" disabled>
+              <ButtonPro variant="bronze" reason="No exported mesh for this job yet">
                 Export mesh
               </ButtonPro>
             )}
@@ -325,24 +333,19 @@ function ViewerPage() {
                     ) : (
                       <button
                         key={fmt}
+                        type="button"
                         disabled
-                        className="mono h-7 rounded-sm border border-border bg-surface-2 text-[11px] uppercase text-muted-foreground opacity-50"
+                        title={`No ${fmt.toUpperCase()} file for this job yet`}
+                        className="mono h-7 cursor-not-allowed rounded-sm border border-border bg-surface-2 text-[11px] uppercase text-muted-foreground opacity-50"
                       >
                         {fmt}
                       </button>
                     ),
                   )}
-                  {["FBX", "USDZ", "STL"].map((f) => (
-                    <button
-                      key={f}
-                      disabled
-                      title="Not supported yet"
-                      className="mono h-7 rounded-sm border border-border bg-surface-2 text-[11px] text-muted-foreground opacity-50"
-                    >
-                      {f}
-                    </button>
-                  ))}
                 </div>
+                <p className="mt-2 text-[10px] text-subtle">
+                  NeuralCanvas exports GLB, OBJ and PLY (vertex colours, no textures).
+                </p>
                 {viewerMesh?.variant === "cleaned" && Object.keys(originalLinks).length > 0 && (
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
                     Original:
@@ -396,4 +399,21 @@ function Kv({ k, v }: { k: string; v: string }) {
       <span className="mono text-ivory">{v}</span>
     </div>
   );
+}
+
+/** Save the current 3D view as a PNG (the canvas keeps its drawing buffer for this). */
+function saveSnapshot(jobId: string) {
+  const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="mesh-canvas"] canvas');
+  if (!canvas) {
+    toast.error("No 3D view to capture", { description: "Wait for the model to finish loading." });
+    return;
+  }
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      toast.error("Snapshot failed", { description: "The browser could not encode the image." });
+      return;
+    }
+    downloadBlob(`${jobId}-snapshot.png`, blob);
+    toast.success("Snapshot saved");
+  }, "image/png");
 }

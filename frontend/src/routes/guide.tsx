@@ -15,9 +15,11 @@ import {
   TerminalSquare,
   Wrench,
   XCircle,
+  Server,
 } from "lucide-react";
 import { PageHeader, Panel } from "@/components/ui-pro/Panel";
-import { PIPELINE_STEP_NAMES } from "@/lib/constants";
+import { LocalBackendNotice } from "@/components/shell/BackendNotices";
+import { OWNER_CONTACT_EMAIL, PIPELINE_STEP_NAMES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/guide")({
@@ -36,6 +38,7 @@ export const Route = createFileRoute("/guide")({
 
 const SECTIONS = [
   { id: "what", label: "What NeuralCanvas does" },
+  { id: "availability", label: "When the backend is available" },
   { id: "nerf", label: "What is a NeRF?" },
   { id: "multiview", label: "How multi-view reconstruction works" },
   { id: "photos", label: "Taking good photos" },
@@ -96,6 +99,8 @@ function GuidePage() {
         </nav>
 
         <article className="min-w-0 space-y-6 text-[13px] leading-relaxed text-foreground">
+          <LocalBackendNotice />
+
           <Section id="what" icon={Sparkles} title="What NeuralCanvas does">
             <p>
               NeuralCanvas turns a set of ordinary photographs of an object into a 3D model you can
@@ -111,8 +116,45 @@ function GuidePage() {
             </p>
             <Callout tone="info" title="One mode today">
               NeuralCanvas currently has one workflow: <strong>photos → 3D model</strong>, using the
-              Instant-NGP engine. Generating models from a text description is a possible future
-              addition, but it is not available yet.
+              Instant-NGP engine. A <strong>Text-to-3D</strong> engine is listed in the engine
+              picker as a work in progress: it is not available yet and no jobs can be created with
+              it.
+            </Callout>
+          </Section>
+
+          <Section id="availability" icon={Server} title="When the backend is available">
+            <p>
+              NeuralCanvas has two parts. The <strong>website</strong> you are looking at runs in
+              your browser. The <strong>backend</strong> is the program that actually does the work:
+              it stores jobs, receives photos and runs the reconstruction on a graphics card. That
+              backend runs on the project owner&apos;s own laptop rather than on a server that is
+              always on.
+            </p>
+            <p>
+              So reconstruction only works while that laptop is switched on and the backend is
+              running. When it isn&apos;t, everything that needs it pauses: creating jobs, uploading
+              photos, running the pipeline, opening, viewing and deleting jobs, and the statistics.
+              Pages such as this Guide, Settings and the layout of the app keep working.
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                The connection indicator in the top bar shows <strong>Connected</strong>,{" "}
+                <strong>Checking</strong> (a check is in progress or one check just failed) or{" "}
+                <strong>Disconnected</strong> (several checks in a row failed).
+              </li>
+              <li>
+                A single missed check is never treated as offline: the site retries a few times
+                first, and keeps checking in the background while the tab is open.
+              </li>
+              <li>
+                When the backend comes back, the indicator turns green and the controls re-enable on
+                their own. You don&apos;t need to reload the page.
+              </li>
+            </ul>
+            <Callout tone="info" title="Need the backend switched on?">
+              While the backend is offline, a notice at the top of the app shows how to reach the
+              project owner (<span className="select-text">{OWNER_CONTACT_EMAIL}</span>) if you need
+              it enabled for your work.
             </Callout>
           </Section>
 

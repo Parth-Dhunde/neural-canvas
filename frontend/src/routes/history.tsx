@@ -2,7 +2,10 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { PageHeader, Panel, ButtonPro } from "@/components/ui-pro/Panel";
 import { EmptyState } from "@/components/ui-pro/EmptyState";
 import { StatusBadge } from "@/components/ui-pro/StatusBadge";
-import { openExistingJob } from "@/lib/jobActions";
+import { backendUnavailableReasonFor, openExistingJob } from "@/lib/jobActions";
+import { downloadTextFile } from "@/lib/download";
+import { jobsToCsv } from "@/lib/jobTable";
+import { toast } from "sonner";
 import { formatLoss } from "@/lib/dashboardStats";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -22,15 +25,25 @@ export const Route = createFileRoute("/history")({
 function HistoryPage() {
   const router = useRouter();
   const jobs = useAppStore((s) => s.jobs);
-  // Finished runs: completed jobs (newest first), then failed ones (newest created first).
+  const backendStatus = useAppStore((s) => s.backendHealth.status);
+  const offlineReason = backendUnavailableReasonFor(backendStatus);
+  // Finished runs: completed jobs (newest first), then failed and cancelled ones (newest first).
   const finishedJobs = [
     ...jobs
       .filter((j) => j.status === "completed")
       .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
     ...jobs
-      .filter((j) => j.status === "failed")
+      .filter((j) => j.status === "failed" || j.status === "cancelled")
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   ];
+
+  const exportReport = () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadTextFile(`neuralcanvas-history-${stamp}.csv`, jobsToCsv(finishedJobs), "text/csv");
+    toast.success(
+      `Exported ${finishedJobs.length} history entr${finishedJobs.length === 1 ? "y" : "ies"}`,
+    );
+  };
 
   return (
     <div className="flex min-h-full flex-col">
@@ -39,14 +52,13 @@ function HistoryPage() {
         title="History"
         description="Chronological log of every reconstruction produced in this workspace."
         actions={
-          <>
-            <ButtonPro variant="outline" reason="Reports are not implemented yet">
-              Export report
-            </ButtonPro>
-            <ButtonPro variant="bronze" reason="Archiving is not implemented yet">
-              Archive selected
-            </ButtonPro>
-          </>
+          <ButtonPro
+            variant="outline"
+            onClick={exportReport}
+            reason={finishedJobs.length === 0 ? "No finished runs to export" : undefined}
+          >
+            Export report (CSV)
+          </ButtonPro>
         }
       />
 
@@ -55,7 +67,7 @@ function HistoryPage() {
           {finishedJobs.length === 0 ? (
             <EmptyState
               title="No reconstruction history yet."
-              description="Completed and failed jobs appear here once the backend is connected and runs finish."
+              description="Completed, failed and cancelled jobs appear here once the backend is connected and runs finish."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -115,6 +127,7 @@ function HistoryPage() {
                           <ButtonPro
                             size="sm"
                             variant="ghost"
+                            reason={offlineReason}
                             onClick={() => {
                               void openExistingJob(j.id);
                               void router.navigate({ to: "/viewer" });

@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   ListChecks,
@@ -13,6 +13,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { APP_NAME } from "@/lib/constants";
+import { openExistingJob } from "@/lib/jobActions";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, sidebarWidthForKey } from "@/lib/sidebarLayout";
 import type { SidebarLayout } from "@/hooks/useSidebarLayout";
 import { useAppStore } from "@/store/useAppStore";
@@ -33,6 +34,14 @@ const nav = [
  * comes from --nc-sidebar-w (see lib/sidebarLayout.ts and styles.css); `lg:rail:` classes style
  * the collapsed icon rail. The rail variant only applies from lg, so the drawer is unaffected.
  */
+const RECENT_STATUS_LABELS: Partial<Record<string, string>> = {
+  running: "RUN",
+  completed: "OK",
+  failed: "ERR",
+  paused: "PAU",
+  cancelled: "CXL",
+};
+
 export function Sidebar({
   mobileOpen = false,
   onClose,
@@ -43,6 +52,7 @@ export function Sidebar({
   layout: SidebarLayout;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const jobs = useAppStore((s) => s.jobs);
   const hardware = useAppStore((s) => s.hardware);
   const recentJobs = jobs.slice(0, 3);
@@ -150,31 +160,32 @@ export function Sidebar({
             ) : (
               <ul className="space-y-0.5 px-1">
                 {recentJobs.map((job) => (
-                  <li
-                    key={job.id}
-                    className="flex items-center gap-2 rounded-sm px-1.5 py-1.5 text-[12px] text-muted-foreground hover:bg-surface-2 hover:text-foreground"
-                  >
-                    <span
-                      className={cn(
-                        "mono w-8 shrink-0 text-[10px]",
-                        job.status === "running"
-                          ? "text-selected"
-                          : job.status === "completed"
-                            ? "text-success"
-                            : job.status === "failed"
-                              ? "text-destructive"
-                              : "text-subtle",
-                      )}
+                  <li key={job.id}>
+                    <button
+                      type="button"
+                      title={`Open ${job.id} on the dashboard`}
+                      onClick={() => {
+                        void openExistingJob(job.id);
+                        void navigate({ to: "/" });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-surface-2 hover:text-foreground"
                     >
-                      {job.status === "running"
-                        ? "RUN"
-                        : job.status === "completed"
-                          ? "OK"
-                          : job.status === "failed"
-                            ? "ERR"
-                            : "—"}
-                    </span>
-                    <span className="truncate">{job.name}</span>
+                      <span
+                        className={cn(
+                          "mono w-8 shrink-0 text-[10px]",
+                          job.status === "running"
+                            ? "text-selected"
+                            : job.status === "completed"
+                              ? "text-success"
+                              : job.status === "failed"
+                                ? "text-destructive"
+                                : "text-subtle",
+                        )}
+                      >
+                        {RECENT_STATUS_LABELS[job.status] ?? "—"}
+                      </span>
+                      <span className="truncate">{job.name}</span>
+                    </button>
                   </li>
                 ))}
               </ul>

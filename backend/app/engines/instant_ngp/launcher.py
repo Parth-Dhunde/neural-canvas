@@ -181,6 +181,10 @@ class InstantNGPLauncher:
                         on_line(stripped)
                 check()
             return_code = process.wait()
+        except BaseException:
+            # Pause, cancel or an error stopped reading: do not leave training running.
+            _stop_process(process)
+            raise
         finally:
             if log_handle is not None:
                 log_handle.close()
@@ -264,3 +268,15 @@ class InstantNGPLauncher:
         except (OSError, subprocess.TimeoutExpired):
             return False
         return completed.returncode == 0
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    """Terminate ``process`` if it is still running, escalating to kill after 10 seconds."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)

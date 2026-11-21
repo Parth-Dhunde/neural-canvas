@@ -9,8 +9,8 @@ const STATUS_CONFIG: Record<
   { label: string; dot: string; emoji: string }
 > = {
   connected: { label: "Connected", dot: "bg-success", emoji: "🟢" },
-  connecting: { label: "Connecting", dot: "bg-warning nc-live-dot", emoji: "🟡" },
-  disconnected: { label: "Disconnected", dot: "bg-subtle", emoji: "🔴" },
+  connecting: { label: "Checking", dot: "bg-warning nc-live-dot", emoji: "🟡" },
+  disconnected: { label: "Disconnected", dot: "bg-destructive/80", emoji: "🔴" },
   error: { label: "Error", dot: "bg-destructive", emoji: "⚠" },
 };
 
@@ -40,6 +40,8 @@ export function BackendStatusBadge() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          type="button"
+          aria-label={`Backend status: ${config.label}`}
           className={cn(
             "flex items-center gap-2 rounded-sm border border-border bg-surface-2 px-2.5 py-1 text-[11px] hover:border-border-strong",
           )}

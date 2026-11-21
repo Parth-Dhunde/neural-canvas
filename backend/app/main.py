@@ -11,6 +11,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.core.paths import get_workspace_root
+from app.jobs.deletion import purge_deletion_leftovers
 from app.schemas.common import HealthResponse, RootResponse, VersionResponse
 from app.services.system_status import log_startup_validation, run_startup_validation
 
@@ -24,6 +25,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logger.info("Starting %s v%s", settings.app_name, __version__)
     logger.info("Workspace root: %s", get_workspace_root())
+    leftovers = purge_deletion_leftovers(settings.jobs_path)
+    if leftovers:
+        logger.info("Removed %d leftover(s) of interrupted job deletions", leftovers)
     validation = run_startup_validation(settings)
     log_startup_validation(validation, logger)
     yield

@@ -1,12 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { PageHeader, Panel, ButtonPro } from "@/components/ui-pro/Panel";
 import { HardwarePanel } from "@/components/ui-pro/HardwarePanel";
+import { WipBadge } from "@/components/ui-pro/WipBadge";
 import { useHardwareTelemetry } from "@/hooks/useHardwareTelemetry";
-import { APP_DESCRIPTION, APP_NAME, SUPPORTED_ENGINES } from "@/lib/constants";
+import { APP_DESCRIPTION, APP_NAME, DEFAULT_BACKEND_URL, SUPPORTED_ENGINES } from "@/lib/constants";
+import { ENGINE_OPTIONS, isSubmittableEngine } from "@/lib/engines";
+import { normalizeBackendUrl } from "@/lib/settingsStorage";
+import { pingHealth } from "@/services/health";
+import { getPipelineConfig, type PipelineConfigApi } from "@/services/system";
 import { useAppStore } from "@/store/useAppStore";
 import { useTheme } from "@/hooks/useTheme";
 import type { ThemePreference } from "@/lib/theme";
-import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/settings")({
@@ -17,19 +22,20 @@ export const Route = createFileRoute("/settings")({
       {
         name: "description",
         content:
-          "Configure default engine, mesh quality, export format, and application preferences.",
+          "Backend connection, default engine, interface preferences and pipeline parameters.",
       },
     ],
   }),
 });
 
-const sections = ["Reconstruction", "Performance", "Export", "Interface", "About"] as const;
+const sections = ["Connection", "Reconstruction", "Interface", "About"] as const;
 
 function SettingsPage() {
   useHardwareTelemetry(true);
-  const [active, setActive] = useState<(typeof sections)[number]>("Reconstruction");
+  const [active, setActive] = useState<(typeof sections)[number]>("Connection");
   const settings = useAppStore((s) => s.settings);
   const setSettings = useAppStore((s) => s.setSettings);
+  const setSelectedEngine = useAppStore((s) => s.setSelectedEngine);
   const theme = useTheme();
 
   return (
@@ -37,7 +43,7 @@ function SettingsPage() {
       <PageHeader
         eyebrow="Preferences"
         title="Settings"
-        description="Backend URL and theme apply immediately. Reconstruction, mesh and export parameters are configured on the backend (backend/.env); rows marked “Not connected” are shown for reference only."
+        description="Changes apply immediately and are saved in this browser. Reconstruction parameters are configured on the backend and shown here read-only."
       />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 md:grid-cols-[220px_1fr]">
@@ -45,7 +51,9 @@ function SettingsPage() {
           {sections.map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => setActive(s)}
+              aria-current={active === s ? "page" : undefined}
               className={cn(
                 "flex shrink-0 items-center rounded-sm px-2.5 py-2 text-[12px] whitespace-nowrap transition-colors md:w-full",
                 active === s
@@ -65,156 +73,44 @@ function SettingsPage() {
         </nav>
 
         <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
+          {active === "Connection" && <ConnectionSection />}
+
           {active === "Reconstruction" && (
             <>
               <SettingRow
                 label="Default engine"
-                hint="Applied when creating new reconstruction jobs."
-                unavailable="Instant-NGP is the only engine"
+                hint="Selected when the app loads and used for new jobs. Work-in-progress engines cannot be selected."
               >
-                <Segmented
-                  value={settings.defaultEngine}
-                  onChange={(v) =>
-                    setSettings({
-                      defaultEngine: v as (typeof SUPPORTED_ENGINES)[number],
-                    })
-                  }
-                  options={[...SUPPORTED_ENGINES]}
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="Mesh quality"
-                unavailable="Set in backend/.env (MESH_RESOLUTION)"
-                hint={`Current preset: ${qualityLabel(settings.meshQuality)}`}
-              >
-                <div className="flex w-full max-w-96 items-center gap-3">
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    value={settings.meshQuality}
-                    onChange={(e) => setSettings({ meshQuality: parseInt(e.target.value) })}
-                    className="flex-1 accent-bronze"
-                  />
-                  <span className="mono w-10 text-right text-[12px] text-ivory">
-                    {settings.meshQuality}
-                  </span>
+                <div className="flex flex-wrap items-center gap-0.5 rounded-sm border border-border bg-surface-2 p-0.5">
+                  {ENGINE_OPTIONS.map((option) => {
+                    const available = isSubmittableEngine(option.id);
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        disabled={!available}
+                        title={option.description}
+                        aria-pressed={settings.defaultEngine === option.id}
+                        onClick={() => {
+                          if (!isSubmittableEngine(option.id)) return;
+                          setSettings({ defaultEngine: option.id });
+                          setSelectedEngine(option.id);
+                        }}
+                        className={cn(
+                          "mono flex items-center gap-2 rounded-sm px-3 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:text-subtle",
+                          settings.defaultEngine === option.id
+                            ? "bg-surface text-selected shadow-sm ring-1 ring-selected/45"
+                            : "text-muted-foreground hover:text-ivory",
+                        )}
+                      >
+                        {option.id}
+                        {!available && <WipBadge />}
+                      </button>
+                    );
+                  })}
                 </div>
               </SettingRow>
-
-              <SettingRow
-                label="Background removal"
-                hint="Automatic segmentation before training."
-                unavailable="Always runs as Stage 2"
-              >
-                <Toggle
-                  on={settings.backgroundRemoval}
-                  onChange={(v) => setSettings({ backgroundRemoval: v })}
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="Auto camera estimation"
-                hint="COLMAP structure-from-motion pass."
-                unavailable="Always runs as Stage 3"
-              >
-                <Toggle
-                  on={settings.autoCameraEstimation}
-                  onChange={(v) => setSettings({ autoCameraEstimation: v })}
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="Mesh cleanup"
-                unavailable="Always runs as Stage 6 (Set in backend/.env)"
-                hint="Remove floating islands and non-manifold geometry."
-              >
-                <Toggle
-                  on={settings.meshCleanup}
-                  onChange={(v) => setSettings({ meshCleanup: v })}
-                />
-              </SettingRow>
-            </>
-          )}
-
-          {active === "Performance" && (
-            <>
-              <SettingRow label="Backend URL" hint="FastAPI reconstruction server endpoint.">
-                <input
-                  value={settings.backendUrl}
-                  onChange={(e) => setSettings({ backendUrl: e.target.value })}
-                  className="mono h-8 w-72 rounded-sm border border-border bg-surface-2 px-2 text-[12px] text-ivory"
-                />
-              </SettingRow>
-              <SettingRow
-                label="Precision"
-                hint="Trade-off between speed and numerical accuracy."
-                unavailable="Not implemented yet"
-              >
-                <Segmented
-                  value={settings.precision}
-                  onChange={(v) => setSettings({ precision: v })}
-                  options={["FP32", "FP16 mixed", "BF16"]}
-                />
-              </SettingRow>
-              <SettingRow
-                label="Ray batch size"
-                unavailable="Not implemented yet"
-                hint="Lower this if you encounter out-of-memory errors."
-              >
-                <input
-                  value={settings.rayBatchSize}
-                  onChange={(e) => setSettings({ rayBatchSize: parseInt(e.target.value) || 4096 })}
-                  type="number"
-                  className="mono h-8 w-32 rounded-sm border border-border bg-surface-2 px-2 text-[12px] text-ivory"
-                />
-              </SettingRow>
-              <SettingRow
-                label="Persistent cache"
-                unavailable="Not implemented yet"
-                hint="Reuse hash-grid checkpoints between similar jobs."
-              >
-                <Toggle defaultOn />
-              </SettingRow>
-              <SettingRow
-                label="Telemetry"
-                hint="Send anonymous performance diagnostics."
-                unavailable="No telemetry is collected"
-              >
-                <Toggle />
-              </SettingRow>
-            </>
-          )}
-
-          {active === "Export" && (
-            <>
-              <SettingRow label="Default format" unavailable="GLB, OBJ and PLY are all exported">
-                <Segmented
-                  value={settings.exportFormat}
-                  onChange={(v) => setSettings({ exportFormat: v })}
-                  options={["GLB", "OBJ", "PLY", "USDZ", "FBX", "STL"]}
-                />
-              </SettingRow>
-              <SettingRow
-                label="Texture resolution"
-                unavailable="Meshes use vertex colours; no textures"
-              >
-                <Segmented value="4K" onChange={() => {}} options={["1K", "2K", "4K", "8K"]} />
-              </SettingRow>
-              <SettingRow
-                label="Embed materials"
-                hint="Bake PBR materials into the output file."
-                unavailable="Meshes use vertex colours; no materials"
-              >
-                <Toggle defaultOn />
-              </SettingRow>
-              <SettingRow
-                label="Coordinate system"
-                unavailable="Exports keep the reconstruction frame"
-              >
-                <Segmented value="Y-Up" onChange={() => {}} options={["Y-Up", "Z-Up"]} />
-              </SettingRow>
+              <PipelineConfigPanel />
             </>
           )}
 
@@ -230,30 +126,22 @@ function SettingsPage() {
                   options={Object.values(THEME_LABELS)}
                 />
               </SettingRow>
-              <SettingRow
-                label="Dense tables"
-                hint="Reduce row height on the Jobs table."
-                unavailable="Not implemented yet"
-              >
+              <SettingRow label="Dense tables" hint="Compact rows on the Jobs table.">
                 <Toggle
+                  label="Dense tables"
                   on={settings.denseTables}
                   onChange={(v) => setSettings({ denseTables: v })}
                 />
               </SettingRow>
               <SettingRow
                 label="Terminal on launch"
-                unavailable="Not implemented yet"
-                hint="Open the integrated terminal by default."
+                hint="Open the integrated terminal when the app loads. Takes effect on the next load."
               >
                 <Toggle
+                  label="Terminal on launch"
                   on={settings.terminalOnLaunch}
                   onChange={(v) => setSettings({ terminalOnLaunch: v })}
                 />
-              </SettingRow>
-              <SettingRow label="Keyboard shortcuts" unavailable="Not implemented yet">
-                <ButtonPro variant="outline" size="sm">
-                  View reference
-                </ButtonPro>
               </SettingRow>
             </>
           )}
@@ -267,7 +155,9 @@ function SettingsPage() {
                   <span className="text-subtle">Version</span>
                   <span className="text-ivory">0.1.0 (development)</span>
                   <span className="text-subtle">Engines</span>
-                  <span className="text-ivory">{SUPPORTED_ENGINES.join(" · ")}</span>
+                  <span className="text-ivory">
+                    {SUPPORTED_ENGINES.join(" · ")} · Text-to-3D (work in progress)
+                  </span>
                   <span className="text-subtle">Backend</span>
                   <span className="text-ivory">FastAPI · {settings.backendUrl}</span>
                 </div>
@@ -284,6 +174,184 @@ function SettingsPage() {
   );
 }
 
+function ConnectionSection() {
+  const backendUrl = useAppStore((s) => s.settings.backendUrl);
+  const status = useAppStore((s) => s.backendHealth.status);
+  const setSettings = useAppStore((s) => s.setSettings);
+  const [draft, setDraft] = useState(backendUrl);
+  const [error, setError] = useState<string | null>(null);
+  const [test, setTest] = useState<{ state: "idle" | "testing" | "ok" | "failed"; url?: string }>({
+    state: "idle",
+  });
+
+  useEffect(() => setDraft(backendUrl), [backendUrl]);
+
+  const save = (value: string) => {
+    const normalized = normalizeBackendUrl(value);
+    if (!normalized) {
+      setError("Enter an http:// or https:// URL, e.g. http://localhost:8000");
+      return;
+    }
+    setError(null);
+    setSettings({ backendUrl: normalized });
+  };
+
+  const runTest = async () => {
+    const normalized = normalizeBackendUrl(draft);
+    if (!normalized) {
+      setError("Enter an http:// or https:// URL, e.g. http://localhost:8000");
+      return;
+    }
+    setError(null);
+    setTest({ state: "testing", url: normalized });
+    const ok = await pingHealth(normalized);
+    setTest({ state: ok ? "ok" : "failed", url: normalized });
+  };
+
+  const statusLabel =
+    status === "connected" ? "Connected" : status === "connecting" ? "Checking" : "Disconnected";
+
+  return (
+    <SettingRow
+      label="Backend URL"
+      hint={`FastAPI reconstruction server. Current status: ${statusLabel}. Saved URLs are checked automatically.`}
+    >
+      <form
+        className="flex w-full flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save(draft);
+        }}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setTest({ state: "idle" });
+            }}
+            aria-label="Backend URL"
+            aria-invalid={Boolean(error)}
+            className="mono h-8 w-72 max-w-full rounded-sm border border-border bg-surface-2 px-2 text-[12px] text-ivory"
+          />
+          <ButtonPro
+            type="submit"
+            size="sm"
+            variant="bronze"
+            disabled={draft.trim() === backendUrl}
+          >
+            Save
+          </ButtonPro>
+          <ButtonPro
+            size="sm"
+            variant="outline"
+            loading={test.state === "testing"}
+            onClick={() => void runTest()}
+          >
+            Test connection
+          </ButtonPro>
+          <ButtonPro
+            size="sm"
+            variant="ghost"
+            disabled={backendUrl === DEFAULT_BACKEND_URL && draft === DEFAULT_BACKEND_URL}
+            onClick={() => {
+              setDraft(DEFAULT_BACKEND_URL);
+              save(DEFAULT_BACKEND_URL);
+            }}
+          >
+            Reset to default
+          </ButtonPro>
+        </div>
+        {error && <p className="text-[11px] text-destructive">{error}</p>}
+        {test.state === "ok" && (
+          <p className="text-[11px] text-success">{test.url} answered /health.</p>
+        )}
+        {test.state === "failed" && (
+          <p className="text-[11px] text-destructive">{test.url} did not answer /health.</p>
+        )}
+      </form>
+    </SettingRow>
+  );
+}
+
+function PipelineConfigPanel() {
+  const backendUrl = useAppStore((s) => s.settings.backendUrl);
+  const status = useAppStore((s) => s.backendHealth.status);
+  const [config, setConfig] = useState<PipelineConfigApi | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    let active = true;
+    getPipelineConfig(backendUrl)
+      .then((value) => {
+        if (active) {
+          setConfig(value);
+          setError(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : "Could not load the configuration");
+      });
+    return () => {
+      active = false;
+    };
+  }, [backendUrl, status]);
+
+  const rows: [string, string][] = config
+    ? [
+        ["Stages (always run, in order)", config.stages_always_run.join(" → ")],
+        ["Camera model (COLMAP)", config.camera_estimation.camera_model],
+        ["COLMAP GPU", config.camera_estimation.use_gpu ? "On" : "Off"],
+        [
+          "Minimum registered images",
+          `${Math.round(config.camera_estimation.min_registration_ratio * 100)}%`,
+        ],
+        ["Training steps (Instant-NGP)", String(config.training.n_steps)],
+        ["Mesh resolution", String(config.mesh.resolution)],
+        ["Mesh density threshold", String(config.mesh.density_threshold)],
+        ["Cleanup smoothing iterations", String(config.mesh_cleanup.taubin_iterations)],
+        ["Cleanup: remove pieces under", `${config.mesh_cleanup.min_component_faces} faces`],
+        [
+          "Cleanup: decimation range",
+          `${config.mesh_cleanup.decimate_min_faces.toLocaleString()}–${config.mesh_cleanup.decimate_max_faces.toLocaleString()} faces`,
+        ],
+        [
+          "Export formats (all produced)",
+          config.export_formats.map((f) => f.toUpperCase()).join(", "),
+        ],
+      ]
+    : [];
+
+  return (
+    <Panel title="Pipeline parameters · read-only">
+      <p className="mb-3 text-[12px] text-muted-foreground">
+        These values are set on the backend (<span className="mono">backend/.env</span>) and apply
+        to every job. They can&apos;t be changed from the browser, because the pipeline reads them
+        when the backend starts.
+      </p>
+      {status !== "connected" ? (
+        <p className="text-[12px] text-subtle">
+          Connect the backend to view its current parameters.
+        </p>
+      ) : error ? (
+        <p className="text-[12px] text-destructive">{error}</p>
+      ) : !config ? (
+        <p className="text-[12px] text-subtle">Loading…</p>
+      ) : (
+        <dl className="mono grid grid-cols-1 gap-x-6 gap-y-1.5 text-[12px] sm:grid-cols-[240px_1fr]">
+          {rows.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-subtle">{k}</dt>
+              <dd className="text-ivory">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </Panel>
+  );
+}
+
 const THEME_LABELS: Record<ThemePreference, string> = {
   light: "Light",
   dark: "Dark",
@@ -297,46 +365,22 @@ function themeFromLabel(label: string): ThemePreference {
   return match ?? "dark";
 }
 
-function qualityLabel(q: number) {
-  if (q < 30) return "Draft";
-  if (q < 55) return "Preview";
-  if (q < 80) return "Production";
-  return "Master";
-}
-
 function SettingRow({
   label,
   hint,
-  unavailable,
   children,
 }: {
   label: string;
   hint?: string;
-  /** Reason the control has no effect; the control is shown disabled for reference. */
-  unavailable?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="grid grid-cols-1 items-start gap-3 rounded-sm border border-border bg-surface-2/60 p-4 md:grid-cols-[280px_1fr] md:gap-6">
       <div>
-        <div className="flex flex-wrap items-center gap-2 text-[13px] text-ivory">
-          {label}
-          {unavailable && (
-            <span className="rounded-sm border border-border-strong px-1.5 py-px text-[9px] tracking-widest text-subtle uppercase">
-              Not connected
-            </span>
-          )}
-        </div>
+        <div className="text-[13px] text-ivory">{label}</div>
         {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
-        {unavailable && <div className="mt-1 text-[11px] text-subtle">{unavailable}</div>}
       </div>
-      {/* A disabled fieldset disables every control inside it. */}
-      <fieldset
-        disabled={Boolean(unavailable)}
-        className={cn("flex min-w-0 flex-wrap items-center", unavailable && "opacity-50")}
-      >
-        {children}
-      </fieldset>
+      <div className="flex min-w-0 flex-wrap items-center">{children}</div>
     </div>
   );
 }
@@ -355,10 +399,11 @@ function Segmented({
       {options.map((o) => (
         <button
           key={o}
+          type="button"
           onClick={() => onChange(o)}
           aria-pressed={value === o}
           className={cn(
-            "mono px-3 py-1 text-[11px] rounded-sm transition-colors disabled:cursor-not-allowed",
+            "mono rounded-sm px-3 py-1 text-[11px] transition-colors",
             value === o
               ? "bg-surface text-selected shadow-sm ring-1 ring-selected/45"
               : "text-muted-foreground hover:text-ivory",
@@ -372,24 +417,21 @@ function Segmented({
 }
 
 function Toggle({
-  on: controlledOn,
+  on,
   onChange,
-  defaultOn,
+  label,
 }: {
-  on?: boolean;
-  onChange?: (v: boolean) => void;
-  defaultOn?: boolean;
+  on: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
 }) {
-  const [internal, setInternal] = useState(!!defaultOn);
-  const on = controlledOn ?? internal;
-  const toggle = () => {
-    const next = !on;
-    setInternal(next);
-    onChange?.(next);
-  };
   return (
     <button
-      onClick={toggle}
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
       className={cn(
         "relative h-5 w-9 rounded-full border transition-colors",
         on ? "border-selected/60 bg-selected/30" : "border-border bg-surface-3",
